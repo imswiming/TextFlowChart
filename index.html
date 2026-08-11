@@ -25,7 +25,7 @@
     background: #1e293b;
     display: flex;
     flex-direction: column;
-    position: relative; /* Anchors the floating mobile toolbar */
+    position: relative;
   }
 
   .toolbar {
@@ -82,7 +82,7 @@
     -webkit-font-feature-settings: "liga" 0, "calt" 0;
     font-feature-settings: "liga" 0, "calt" 0;
     tab-size: 8;
-    padding: 18px 16px;
+    padding: var(--editor-padding-top, 18px) 16px 18px 16px;
     border-radius: 0;
     white-space: pre;
     box-sizing: border-box;
@@ -477,6 +477,17 @@
     return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) };
   }
 
+  function updateMobileToolbarPadding() {
+    if (window.innerWidth <= 768 && toolbar.classList.contains('visible')) {
+      const toolbarHeight = toolbar.offsetHeight;
+      const topPadding = toolbarHeight + 20; 
+      document.documentElement.style.setProperty('--editor-padding-top', topPadding + 'px');
+    } else {
+      document.documentElement.style.setProperty('--editor-padding-top', '18px');
+    }
+    fontMetrics = null; 
+  }
+
   function computeNodeBoxes(formatted) {
     const lines = formatted.text.split('\n');
     const { lineToNodeMap, visibleNodes } = formatted;
@@ -607,7 +618,11 @@
     }, 200);
   });
 
-  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); });
+  window.addEventListener('resize', () => { 
+    updateMobileToolbarPadding();
+    fontMetrics = null; 
+    renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
+  });
 
   function updateFontSize(newSize) {
     const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
@@ -764,6 +779,8 @@
     } else {
       toolbar.classList.add('visible');
     }
+    updateMobileToolbarPadding();
+    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
   }
 
   document.addEventListener('selectionchange', () => {
@@ -807,6 +824,8 @@
     const state = getCurrentState();
     if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex);
     lastActiveMasterIdx = -1;
+    if (window.innerWidth < 768) toolbar.classList.remove('visible');
+    updateMobileToolbarPadding();
     renderAndSave();
   });
 
