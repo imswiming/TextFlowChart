@@ -9,13 +9,14 @@
 
   * { box-sizing: border-box; font-family: 'Roboto', sans-serif; }
 
+  /* Use dvh to adjust natively when mobile keyboards open */
   body, html {
     background-color: #0f172a;
     color: #f8fafc;
     margin: 0;
     padding: 0;
     width: 100%;
-    height: 100%;
+    height: 100dvh; 
     overflow: hidden;
   }
 
@@ -35,7 +36,7 @@
     background: #1e293b;
     border-bottom: 1px solid #334155;
     z-index: 10;
-    transition: opacity 0.2s, max-height 0.2s;
+    flex-shrink: 0; /* Prevent toolbar from squishing */
   }
 
   .toolbar button {
@@ -66,6 +67,7 @@
     width: 100%;
     flex-grow: 1;
     overflow: hidden;
+    touch-action: pan-x pan-y; /* Allow manual pan/scroll while handling custom gestures */
   }
 
   .editor, .editor-overlay {
@@ -73,7 +75,7 @@
     height: 100%;
     margin: 0;
     font-family: 'Roboto', sans-serif;
-    font-size: 14px;
+    font-size: var(--editor-font-size, 14px);
     line-height: 2;            
     letter-spacing: 0;
     font-variant-ligatures: none;
@@ -143,7 +145,7 @@
     right: -16px;
     top: 50%;
     transform: translateY(-50%);
-    font-size: 10px;
+    font-size: 0.8em;
     color: #38bdf8;
   }
 
@@ -169,12 +171,8 @@
   .modal button, .modal select { width: 100%; margin-top: 10px; padding: 8px; }
 
   @media (max-width: 768px) {
-    .toolbar {
-      display: none;
-    }
-    .toolbar.visible {
-      display: flex;
-    }
+    .toolbar { display: none; }
+    .toolbar.visible { display: flex; }
   }
 </style>
 </head>
@@ -196,7 +194,7 @@
     <button id="moveDownBtn" type="button">Down</button>
   </div>
 
-  <div class="editor-wrap">
+  <div class="editor-wrap" id="editorWrap">
     <textarea id="editor" class="editor" spellcheck="false"></textarea>
     <div id="overlay" class="editor-overlay" aria-hidden="true">
       <div id="overlay-content" class="overlay-content"></div>
@@ -217,6 +215,7 @@
 
 <script>
   const editor = document.getElementById('editor');
+  const editorWrap = document.getElementById('editorWrap');
   const overlay = document.getElementById('overlay');
   const overlayContent = document.getElementById('overlay-content');
   const toolbar = document.getElementById('toolbar');
@@ -228,6 +227,11 @@
   let inspireActive = false;
   let foldedNodes = new Set();
   let lastActiveNodeIdx = -1;
+  let currentDocName = 'default';
+  let currentFontSize = parseInt(localStorage.getItem('tree_zoom')) || 14;
+
+  // Apply zoom immediately
+  document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
 
   class HistoryManager {
     constructor() {
@@ -252,6 +256,7 @@
         editorElem.selectionStart = editorElem.selectionEnd = state.pos;
         callback();
         this.isTracking = true;
+        triggerAutoSave();
       }
     }
     redo(editorElem, callback) {
@@ -264,10 +269,16 @@
         editorElem.selectionStart = editorElem.selectionEnd = state.pos;
         callback();
         this.isTracking = true;
+        triggerAutoSave();
       }
     }
   }
   const historyMgr = new HistoryManager();
+
+  function triggerAutoSave() {
+    localStorage.setItem('tree_doc_' + currentDocName, editor.value);
+    localStorage.setItem('last_open_doc', currentDocName);
+  }
 
   function parseLine(rawLine) {
     const unit = ' '.repeat(INDENT_WIDTH);
@@ -527,8 +538,67 @@
 
   function applyFormatted(formatted) { editor.value = formatted.text; renderOverlay(formatted); }
 
-  editor.addEventListener('scroll', syncOverlayScroll);
+  let scrollTimeout;
+  editor.addEventListener('scroll', () => {
+    syncOverlayScroll();
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+        localStorage.setItem('last_scroll_left_' + currentDocName, editor.scrollLeft);
+        localStorage.setItem('last_scroll_top_' + currentDocName, editor.scrollTop);
+    }, 200);
+  });
+
   window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTree(editor.value)); });
+
+  // Update Font Size function for gestures
+  function updateFontSize(newSize) {
+    const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
+    if (clamped === currentFontSize) return;
+    currentFontSize = clamped;
+    document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
+    localStorage.setItem('tree_zoom', currentFontSize);
+    fontMetrics = null; 
+    renderOverlay(formatTree(editor.value));
+  }
+
+  // 1. MOUSE WHEEL / TRACKPAD ZOOM (Ctrl + Scroll)
+  editorWrap.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      updateFontSize(currentFontSize + delta);
+    }
+  }, { passive: false });
+
+  // 2. TOUCH PINCH-TO-ZOOM GESTURES
+  let initialPinchDistance = null;
+  let initialPinchFontSize = currentFontSize;
+
+  function getDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  editorWrap.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      initialPinchDistance = getDistance(e.touches);
+      initialPinchFontSize = currentFontSize;
+    }
+  }, { passive: true });
+
+  editorWrap.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && initialPinchDistance) {
+      e.preventDefault(); // Prevent native browser page zoom
+      const currentDist = getDistance(e.touches);
+      const scale = currentDist / initialPinchDistance;
+      updateFontSize(initialPinchFontSize * scale);
+    }
+  }, { passive: false });
+
+  const resetPinch = () => { initialPinchDistance = null; };
+  editorWrap.addEventListener('touchend', resetPinch);
+  editorWrap.addEventListener('touchcancel', resetPinch);
 
   function getCurrentNodeAndOffset() {
     const start = editor.selectionStart, lines = editor.value.split('\n');
@@ -575,8 +645,6 @@
     const rawNodes = parseDocument(editor.value);
     const activeNode = rawNodes[state.nodeIndex];
 
-    // MOBILE FIX: Detect space inserted at the start of an empty (or any) node 
-    // to handle mobile keyboards where keydown doesn't pass ' '.
     if (activeNode && activeNode.content.startsWith(' ') && state.contentOffset === 1) {
       activeNode.depth += 1;
       activeNode.content = activeNode.content.substring(1); 
@@ -584,6 +652,7 @@
       applyFormatted(fmt);
       restoreCursorForNode(fmt, state.nodeIndex, 0);
       historyMgr.save(editor.value, editor.selectionStart);
+      triggerAutoSave();
       return; 
     }
 
@@ -592,10 +661,14 @@
       applyFormatted(formatted);
       restoreCursorForNode(formatted, state.nodeIndex, state.contentOffset);
       historyMgr.save(editor.value, editor.selectionStart);
+      triggerAutoSave();
     } else {
       renderOverlay(formatted);
       clearTimeout(inputTimeout);
-      inputTimeout = setTimeout(() => historyMgr.save(editor.value, editor.selectionStart), 300);
+      inputTimeout = setTimeout(() => {
+        historyMgr.save(editor.value, editor.selectionStart);
+        triggerAutoSave();
+      }, 300);
     }
   });
 
@@ -623,7 +696,9 @@
 
     if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content === '?') {
       if (state.nodeIndex === 0) {
-        nodes.splice(1, 0, { depth: 1, content: '' });
+        for (let i = 0; i < nodes.length; i++) nodes[i].depth++;
+        nodes.unshift({ depth: 0, content: '?' });
+        if(nodes[1]) nodes[1].content = '';
         targetNodeIdx = 1; targetOffset = 0; needsApply = true;
       } else {
         nodes[state.nodeIndex].content = '';
@@ -633,13 +708,14 @@
     }
 
     const prevActiveNodeIdx = lastActiveNodeIdx;
-    lastActiveNodeIdx = targetNodeIdx; // Set BEFORE renderOverlay to fix highlight delay
+    lastActiveNodeIdx = targetNodeIdx;
 
     if (needsApply) {
       const formatted = formatTreeFromNodes(nodes);
       applyFormatted(formatted);
       restoreCursorForNode(formatted, targetNodeIdx, targetOffset);
       historyMgr.save(editor.value, editor.selectionStart);
+      triggerAutoSave();
     } else if (prevActiveNodeIdx !== targetNodeIdx) {
       renderOverlay(formatTreeFromNodes(nodes)); 
     }
@@ -651,6 +727,7 @@
     lastActiveNodeIdx = -1;
     applyFormatted(formatTreeFromNodes(nodes));
     historyMgr.save(editor.value, editor.selectionStart);
+    triggerAutoSave();
   });
 
   editor.addEventListener('keydown', (e) => {
@@ -665,34 +742,50 @@
     if (e.key === ' ' && node.content === '-' && state.contentOffset === 1) {
       e.preventDefault(); node.content = '';
       nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
-      lastActiveNodeIdx = state.nodeIndex + 1; modified = true;
+      const fmt = formatTreeFromNodes(nodes); 
+      lastActiveNodeIdx = state.nodeIndex + 1;
+      applyFormatted(fmt); 
+      restoreCursorForNode(fmt, lastActiveNodeIdx, 0);
+      renderOverlay(fmt);
+      modified = true;
     } else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) {
       e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
       const end = getSubtreeEnd(nodes, state.nodeIndex);
       for(let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); modified = true;
+      const fmt = formatTreeFromNodes(nodes); 
+      applyFormatted(fmt); 
+      restoreCursorForNode(fmt, state.nodeIndex, 0); 
+      renderOverlay(fmt);
+      modified = true;
     } else if (e.key === 'Enter') {
       e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
       nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
-      lastActiveNodeIdx = state.nodeIndex + 1; modified = true;
+      const fmt = formatTreeFromNodes(nodes); 
+      lastActiveNodeIdx = state.nodeIndex + 1;
+      applyFormatted(fmt); 
+      restoreCursorForNode(fmt, lastActiveNodeIdx, 0);
+      renderOverlay(fmt);
+      modified = true;
     } else if (e.key === 'Tab') {
       e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
       const end = getSubtreeEnd(nodes, state.nodeIndex);
       if (e.shiftKey && node.depth > 0) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--; } 
       else if (!e.shiftKey) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth++; }
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); modified = true;
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); renderOverlay(fmt); modified = true;
     } else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) {
       e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
       const end = getSubtreeEnd(nodes, state.nodeIndex);
       for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--;
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); modified = true;
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); renderOverlay(fmt); modified = true;
     }
-    if (modified) historyMgr.save(editor.value, editor.selectionStart);
+    
+    if (modified) {
+        historyMgr.save(editor.value, editor.selectionStart);
+        triggerAutoSave();
+    }
   });
 
-  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(editor.value, editor.selectionStart); };
+  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(editor.value, editor.selectionStart); triggerAutoSave(); };
 
   document.getElementById('inspireBtn').onclick = wrapAction(() => {
     inspireActive = !inspireActive;
@@ -719,16 +812,16 @@
     const end = getSubtreeEnd(nodes, state.nodeIndex);
     for (let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
     nodes.splice(state.nodeIndex, 0, { depth: nodes[state.nodeIndex].depth - 1, content: '' });
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0);
-    lastActiveNodeIdx = state.nodeIndex; editor.focus();
+    lastActiveNodeIdx = state.nodeIndex;
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); renderOverlay(fmt); editor.focus();
   });
 
   document.getElementById('newChildBtn').onclick = wrapAction(() => {
     const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
     if (!nodes[state.nodeIndex]) return;
     nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth + 1, content: '' });
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
-    lastActiveNodeIdx = state.nodeIndex + 1; editor.focus();
+    lastActiveNodeIdx = state.nodeIndex + 1;
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, lastActiveNodeIdx, 0); renderOverlay(fmt); editor.focus();
   });
   
   document.getElementById('foldBtn').onclick = wrapAction(() => {
@@ -774,35 +867,78 @@
     const select = document.getElementById('savedList');
     select.innerHTML = '';
     const keys = Object.keys(localStorage).filter(k => k.startsWith('tree_doc_'));
-    keys.forEach(k => { const opt = document.createElement('option'); opt.value = k; opt.textContent = k.replace('tree_doc_', ''); select.appendChild(opt); });
+    keys.forEach(k => { 
+        const opt = document.createElement('option'); 
+        opt.value = k; 
+        opt.textContent = k.replace('tree_doc_', '') + (k.replace('tree_doc_', '') === currentDocName ? ' (Current)' : ''); 
+        select.appendChild(opt); 
+    });
     document.getElementById('saveModal').style.display = 'flex';
   };
   document.getElementById('closeModalBtn').onclick = () => document.getElementById('saveModal').style.display = 'none';
   document.getElementById('saveDocBtn').onclick = () => {
-    const name = prompt('Name your document:');
-    if(name) { localStorage.setItem('tree_doc_' + name, editor.value); document.getElementById('closeModalBtn').click(); }
+    const name = prompt('Name your document:', currentDocName !== 'default' ? currentDocName : '');
+    if(name) { 
+        currentDocName = name;
+        triggerAutoSave(); 
+        document.getElementById('closeModalBtn').click(); 
+    }
   };
   document.getElementById('loadDocBtn').onclick = () => {
     const val = document.getElementById('savedList').value;
-    if(val) { editor.value = localStorage.getItem(val); foldedNodes.clear(); applyFormatted(formatTree(editor.value)); document.getElementById('closeModalBtn').click(); }
+    if(val) { 
+        currentDocName = val.replace('tree_doc_', '');
+        editor.value = localStorage.getItem(val); 
+        foldedNodes.clear(); 
+        applyFormatted(formatTree(editor.value)); 
+        
+        setTimeout(() => {
+            editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
+            editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
+        }, 0);
+        
+        localStorage.setItem('last_open_doc', currentDocName);
+        document.getElementById('closeModalBtn').click(); 
+    }
   };
   document.getElementById('deleteDocBtn').onclick = () => {
     const val = document.getElementById('savedList').value;
-    if(val) { localStorage.removeItem(val); document.getElementById('openBtn').click(); }
+    if(val) { 
+        localStorage.removeItem(val); 
+        localStorage.removeItem('last_scroll_left_' + val.replace('tree_doc_', ''));
+        localStorage.removeItem('last_scroll_top_' + val.replace('tree_doc_', ''));
+        document.getElementById('openBtn').click(); 
+    }
   };
   document.getElementById('importExportBtn').onclick = () => {
     const text = editor.value;
     navigator.clipboard.writeText(text).then(() => {
         const paste = prompt("Exported to clipboard! Paste here to Import, or click Cancel:");
-        if (paste) { editor.value = paste; foldedNodes.clear(); applyFormatted(formatTree(editor.value)); }
+        if (paste) { editor.value = paste; foldedNodes.clear(); applyFormatted(formatTree(editor.value)); triggerAutoSave(); }
     });
   };
 
+  // Initialization & Load State
   const INITIAL_NODES = [{ depth: 0, content: '?' }];
-  applyFormatted(formatTreeFromNodes(INITIAL_NODES));
-  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(() => { fontMetrics = null; applyFormatted(formatTreeFromNodes(INITIAL_NODES)); historyMgr.save(editor.value, 0); }); } 
-  else setTimeout(() => { fontMetrics = null; applyFormatted(formatTreeFromNodes(INITIAL_NODES)); historyMgr.save(editor.value, 0); }, 200);
+  const savedDoc = localStorage.getItem('last_open_doc');
+  
+  if (savedDoc && localStorage.getItem('tree_doc_' + savedDoc)) {
+      currentDocName = savedDoc;
+      editor.value = localStorage.getItem('tree_doc_' + savedDoc);
+      applyFormatted(formatTree(editor.value));
+      setTimeout(() => {
+          editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
+          editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
+      }, 0);
+  } else {
+      applyFormatted(formatTreeFromNodes(INITIAL_NODES));
+  }
 
+  if (document.fonts && document.fonts.ready) { 
+      document.fonts.ready.then(() => { fontMetrics = null; applyFormatted(formatTree(editor.value)); historyMgr.save(editor.value, 0); }); 
+  } else {
+      setTimeout(() => { fontMetrics = null; applyFormatted(formatTree(editor.value)); historyMgr.save(editor.value, 0); }, 200);
+  }
 </script>
 
 </body>
