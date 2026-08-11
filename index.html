@@ -9,7 +9,6 @@
 
   * { box-sizing: border-box; font-family: 'Roboto', sans-serif; }
 
-  /* Use dvh to adjust natively when mobile keyboards open */
   body, html {
     background-color: #0f172a;
     color: #f8fafc;
@@ -26,6 +25,7 @@
     background: #1e293b;
     display: flex;
     flex-direction: column;
+    position: relative; /* Anchors the floating mobile toolbar */
   }
 
   .toolbar {
@@ -36,7 +36,7 @@
     background: #1e293b;
     border-bottom: 1px solid #334155;
     z-index: 10;
-    flex-shrink: 0; /* Prevent toolbar from squishing */
+    flex-shrink: 0;
   }
 
   .toolbar button {
@@ -67,7 +67,7 @@
     width: 100%;
     flex-grow: 1;
     overflow: hidden;
-    touch-action: pan-x pan-y; /* Allow manual pan/scroll while handling custom gestures */
+    touch-action: pan-x pan-y;
   }
 
   .editor, .editor-overlay {
@@ -142,11 +142,29 @@
   
   .fold-indicator {
     position: absolute;
-    right: -16px;
+    right: -10px;
     top: 50%;
     transform: translateY(-50%);
-    font-size: 0.8em;
+    font-size: 10px;
     color: #38bdf8;
+    background: #0f172a;
+    border: 1px solid #38bdf8;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    pointer-events: auto;
+    box-shadow: 0 0 4px rgba(56, 189, 248, 0.4);
+    transition: all 0.15s ease;
+  }
+
+  .fold-indicator:hover {
+    background: #0284c7;
+    color: #ffffff;
   }
 
   /* Modals */
@@ -154,7 +172,7 @@
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.6);
-    z-index: 100;
+    z-index: 200;
     display: none;
     justify-content: center;
     align-items: center;
@@ -170,8 +188,24 @@
   .modal h3 { margin-top: 0; }
   .modal button, .modal select { width: 100%; margin-top: 10px; padding: 8px; }
 
+  /* Floating mobile toolbar styles */
   @media (max-width: 768px) {
-    .toolbar { display: none; }
+    .toolbar {
+      display: none;
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 100;
+      background: rgba(30, 41, 59, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid #475569;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+      max-height: 40vh;
+      overflow-y: auto;
+    }
     .toolbar.visible { display: flex; }
   }
 </style>
@@ -225,12 +259,11 @@
   const NODE_MARK = '\u200B';      
 
   let inspireActive = false;
-  let foldedNodes = new Set();
-  let lastActiveNodeIdx = -1;
+  let masterNodes = [];
+  let lastActiveMasterIdx = -1;
   let currentDocName = 'default';
   let currentFontSize = parseInt(localStorage.getItem('tree_zoom')) || 14;
 
-  // Apply zoom immediately
   document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
 
   class HistoryManager {
@@ -239,35 +272,32 @@
       this.redoStack = [];
       this.isTracking = true;
     }
-    save(text, pos) {
+    save(nodesState, pos) {
       if (!this.isTracking) return;
-      if (this.undoStack.length === 0 || this.undoStack[this.undoStack.length - 1].text !== text) {
-        this.undoStack.push({ text, pos, folded: new Set(foldedNodes) });
+      const serialized = JSON.stringify(nodesState);
+      if (this.undoStack.length === 0 || this.undoStack[this.undoStack.length - 1].data !== serialized) {
+        this.undoStack.push({ data: serialized, pos });
         this.redoStack = [];
       }
     }
-    undo(editorElem, callback) {
+    undo(callback) {
       if (this.undoStack.length > 1) {
         this.isTracking = false;
         this.redoStack.push(this.undoStack.pop());
         const state = this.undoStack[this.undoStack.length - 1];
-        editorElem.value = state.text;
-        foldedNodes = new Set(state.folded);
-        editorElem.selectionStart = editorElem.selectionEnd = state.pos;
-        callback();
+        masterNodes = JSON.parse(state.data);
+        callback(state.pos);
         this.isTracking = true;
         triggerAutoSave();
       }
     }
-    redo(editorElem, callback) {
+    redo(callback) {
       if (this.redoStack.length > 0) {
         this.isTracking = false;
         const state = this.redoStack.pop();
         this.undoStack.push(state);
-        editorElem.value = state.text;
-        foldedNodes = new Set(state.folded);
-        editorElem.selectionStart = editorElem.selectionEnd = state.pos;
-        callback();
+        masterNodes = JSON.parse(state.data);
+        callback(state.pos);
         this.isTracking = true;
         triggerAutoSave();
       }
@@ -276,7 +306,7 @@
   const historyMgr = new HistoryManager();
 
   function triggerAutoSave() {
-    localStorage.setItem('tree_doc_' + currentDocName, editor.value);
+    localStorage.setItem('tree_doc_' + currentDocName, JSON.stringify(masterNodes));
     localStorage.setItem('last_open_doc', currentDocName);
   }
 
@@ -291,7 +321,7 @@
     return { depth, content, prefixLength, markerLength, contentStart, isNodeConnector: markerLength === 1 };
   }
 
-  function parseDocument(text) {
+  function parseDocumentToNodes(text) {
     const rawLines = text.split('\n');
     const nodes = [];
     for (let i = 0; i < rawLines.length; i++) {
@@ -301,11 +331,42 @@
       if (prevNode && prevNode.depth === parsed.depth && !parsed.isNodeConnector) {
         prevNode.content += (prevNode.content ? ' ' : '') + parsed.content;
       } else {
-        nodes.push({ depth: parsed.depth, content: parsed.content, id: nodes.length });
+        nodes.push({ depth: parsed.depth, content: parsed.content, folded: false });
       }
     }
-    if (nodes.length === 0) nodes.push({ depth: 0, content: '?', id: 0 });
+    if (nodes.length === 0) nodes.push({ depth: 0, content: '?', folded: false });
     return nodes;
+  }
+
+  function hasChildren(nodes, idx) {
+    return idx + 1 < nodes.length && nodes[idx + 1].depth > nodes[idx].depth;
+  }
+
+  function getSubtreeEnd(nodes, idx) {
+    const depth = nodes[idx].depth;
+    let j = idx + 1;
+    while (j < nodes.length && nodes[j].depth > depth) j++;
+    return j;
+  }
+
+  function getVisibleNodes() {
+    const visible = [];
+    let suppressDepth = -1;
+    for (let i = 0; i < masterNodes.length; i++) {
+      const node = masterNodes[i];
+      if (suppressDepth !== -1) {
+        if (node.depth > suppressDepth) {
+          continue;
+        } else {
+          suppressDepth = -1;
+        }
+      }
+      visible.push({ ...node, masterIndex: i });
+      if (node.folded && hasChildren(masterNodes, i)) {
+        suppressDepth = node.depth;
+      }
+    }
+    return visible;
   }
 
   function capitalizeFirst(content) {
@@ -336,39 +397,26 @@
     return lines;
   }
 
-  function getSubtreeEnd(nodes, idx) {
-    const depth = nodes[idx].depth;
-    let j = idx + 1;
-    while (j < nodes.length && nodes[j].depth > depth) j++;
-    return j;
-  }
-
-  function formatTreeFromNodes(nodes) {
+  function formatTreeFromNodes(visibleNodes) {
     const formattedLines = [], lineToNodeMap = [], rowGuides = [];
-    let skipUntil = -1;
 
-    for (let i = 0; i < nodes.length; i++) {
-      if (skipUntil !== -1 && i < skipUntil) continue;
-      else skipUntil = -1;
-
-      const node = nodes[i];
-      if (foldedNodes.has(i)) { skipUntil = getSubtreeEnd(nodes, i); }
-
+    for (let i = 0; i < visibleNodes.length; i++) {
+      const node = visibleNodes[i];
       const depth = node.depth;
       const wrapped = wrapText(node.content, MAX_CONTENT_LENGTH);
-      let hasLaterSibling = false;
       
-      for (let j = i + 1; j < nodes.length; j++) {
-        if (nodes[j].depth < depth) break;
-        if (nodes[j].depth === depth) { hasLaterSibling = true; break; }
+      let hasLaterSibling = false;
+      for (let j = i + 1; j < visibleNodes.length; j++) {
+        if (visibleNodes[j].depth < depth) break;
+        if (visibleNodes[j].depth === depth) { hasLaterSibling = true; break; }
       }
 
       const ancestorSegs = [];
       for (let d = 1; d < depth; d++) {
         let hasLaterAncestorSibling = false;
-        for (let j = i + 1; j < nodes.length; j++) {
-          if (nodes[j].depth < d) break;
-          if (nodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
+        for (let j = i + 1; j < visibleNodes.length; j++) {
+          if (visibleNodes[j].depth < d) break;
+          if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
         }
         if (hasLaterAncestorSibling) ancestorSegs.push({ col: d, kind: 'through' });
       }
@@ -376,7 +424,7 @@
       for (let w = 0; w < wrapped.length; w++) {
         const isFirst = w === 0;
         formattedLines.push(' '.repeat(depth * INDENT_WIDTH) + (isFirst ? NODE_MARK : '') + wrapped[w]);
-        lineToNodeMap.push({ nodeIndex: i, isFirstLine: isFirst });
+        lineToNodeMap.push({ visibleIndex: i, masterIndex: node.masterIndex, isFirstLine: isFirst });
         const segs = ancestorSegs.slice();
         if (depth > 0) {
           if (isFirst) segs.push({ col: depth, kind: hasLaterSibling ? 'elbow-tee' : 'elbow-corner' });
@@ -385,20 +433,17 @@
         rowGuides.push(segs);
       }
 
-      let nextVisibleIdx = i + 1;
-      if (foldedNodes.has(i)) nextVisibleIdx = skipUntil;
-
-      if (nextVisibleIdx < nodes.length) {
+      if (i + 1 < visibleNodes.length) {
         formattedLines.push('');
         lineToNodeMap.push(null); 
         const spacerSegs = [];
-        const nextNode = nodes[nextVisibleIdx];
+        const nextNode = visibleNodes[i + 1];
         
         for (let d = 1; d < nextNode.depth; d++) {
           let hasLaterAncestorSibling = false;
-          for (let j = nextVisibleIdx + 1; j < nodes.length; j++) {
-            if (nodes[j].depth < d) break;
-            if (nodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
+          for (let j = i + 1; j < visibleNodes.length; j++) {
+            if (visibleNodes[j].depth < d) break;
+            if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
           }
           if (hasLaterAncestorSibling) spacerSegs.push({ col: d, kind: 'through' });
         }
@@ -406,10 +451,8 @@
         rowGuides.push(spacerSegs);
       }
     }
-    return { text: formattedLines.join('\n'), nodes, lineToNodeMap, rowGuides };
+    return { text: formattedLines.join('\n'), visibleNodes, lineToNodeMap, rowGuides };
   }
-
-  function formatTree(text) { return formatTreeFromNodes(parseDocument(text)); }
 
   let fontMetrics = null;
   function measureText(text) {
@@ -436,19 +479,20 @@
 
   function computeNodeBoxes(formatted) {
     const lines = formatted.text.split('\n');
-    const { lineToNodeMap, nodes } = formatted;
+    const { lineToNodeMap, visibleNodes } = formatted;
     const boxes = [];
     let i = 0;
 
     while (i < lines.length) {
       const mapInfo = lineToNodeMap[i];
       if (!mapInfo) { i++; continue; }
-      const nodeIndex = mapInfo.nodeIndex;
-      const node = nodes[nodeIndex];
+      const visIndex = mapInfo.visibleIndex;
+      const masterIndex = mapInfo.masterIndex;
+      const node = visibleNodes[visIndex];
       if (!node) { i++; continue; }
 
       let j = i, startCol = null, maxPxWidth = 0, hasContent = false;
-      while (j < lines.length && lineToNodeMap[j] && lineToNodeMap[j].nodeIndex === nodeIndex) {
+      while (j < lines.length && lineToNodeMap[j] && lineToNodeMap[j].visibleIndex === visIndex) {
         const parsed = parseLine(lines[j]);
         if (startCol === null) startCol = parsed.prefixLength;
         if (parsed.content.length > 0) {
@@ -465,10 +509,10 @@
       for(let k=i; k<j; k++) textOverlayContent += (k>i?'\n':'') + parseLine(lines[k]).content;
 
       boxes.push({ 
-        nodeIndex, lineStart: i, lineCount: j - i, 
+        visIndex, masterIndex, lineStart: i, lineCount: j - i, 
         prefixPxWidth: measureText(' '.repeat(startCol)), 
         maxPxWidth, isAssumption: node.content.startsWith('Assumption:'),
-        isFolded: foldedNodes.has(nodeIndex),
+        isFolded: node.folded,
         textOverlayContent
       });
       i = j;
@@ -487,7 +531,7 @@
 
     computeNodeBoxes(formatted).forEach(b => {
       const div = document.createElement('div');
-      div.className = 'node-bubble' + (b.isAssumption ? ' assumption' : '') + (b.nodeIndex === lastActiveNodeIdx ? ' active-node' : '');
+      div.className = 'node-bubble' + (b.isAssumption ? ' assumption' : '') + (b.masterIndex === lastActiveMasterIdx ? ' active-node' : '');
       div.style.left = (paddingLeft + b.prefixPxWidth - 12) + 'px'; 
       div.style.top = (paddingTop + b.lineStart * lineHeight - 4) + 'px';
       div.style.width = (b.maxPxWidth + 24) + 'px'; 
@@ -499,10 +543,15 @@
       txt.textContent = b.textOverlayContent;
       div.appendChild(txt);
 
-      if (b.isFolded) {
+      if (hasChildren(masterNodes, b.masterIndex)) {
         const foldInd = document.createElement('div');
         foldInd.className = 'fold-indicator';
-        foldInd.textContent = '▶';
+        foldInd.textContent = b.isFolded ? '▶' : '▼';
+        foldInd.title = b.isFolded ? 'Click to Unfold' : 'Click to Fold';
+        foldInd.onclick = (e) => {
+          e.stopPropagation();
+          toggleFold(b.masterIndex);
+        };
         div.appendChild(foldInd);
       }
       frag.appendChild(div);
@@ -536,7 +585,17 @@
     frag.appendChild(svg); overlayContent.appendChild(frag); syncOverlayScroll();
   }
 
-  function applyFormatted(formatted) { editor.value = formatted.text; renderOverlay(formatted); }
+  function renderAndSave(targetMasterIdx = -1, contentOffset = 0) {
+    const visible = getVisibleNodes();
+    const formatted = formatTreeFromNodes(visible);
+    editor.value = formatted.text;
+    renderOverlay(formatted);
+    if (targetMasterIdx !== -1) {
+      restoreCursorForMasterNode(targetMasterIdx, contentOffset);
+    }
+    historyMgr.save(masterNodes, editor.selectionStart);
+    triggerAutoSave();
+  }
 
   let scrollTimeout;
   editor.addEventListener('scroll', () => {
@@ -548,9 +607,8 @@
     }, 200);
   });
 
-  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTree(editor.value)); });
+  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); });
 
-  // Update Font Size function for gestures
   function updateFontSize(newSize) {
     const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
     if (clamped === currentFontSize) return;
@@ -558,10 +616,10 @@
     document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
     localStorage.setItem('tree_zoom', currentFontSize);
     fontMetrics = null; 
-    renderOverlay(formatTree(editor.value));
+    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
   }
 
-  // 1. MOUSE WHEEL / TRACKPAD ZOOM (Ctrl + Scroll)
+  // Zoom Gestures
   editorWrap.addEventListener('wheel', (e) => {
     if (e.ctrlKey) {
       e.preventDefault();
@@ -570,7 +628,6 @@
     }
   }, { passive: false });
 
-  // 2. TOUCH PINCH-TO-ZOOM GESTURES
   let initialPinchDistance = null;
   let initialPinchFontSize = currentFontSize;
 
@@ -589,7 +646,7 @@
 
   editorWrap.addEventListener('touchmove', (e) => {
     if (e.touches.length === 2 && initialPinchDistance) {
-      e.preventDefault(); // Prevent native browser page zoom
+      e.preventDefault();
       const currentDist = getDistance(e.touches);
       const scale = currentDist / initialPinchDistance;
       updateFontSize(initialPinchFontSize * scale);
@@ -600,80 +657,107 @@
   editorWrap.addEventListener('touchend', resetPinch);
   editorWrap.addEventListener('touchcancel', resetPinch);
 
-  function getCurrentNodeAndOffset() {
+  function getCurrentState() {
     const start = editor.selectionStart, lines = editor.value.split('\n');
     let charCount = 0, currentLineIdx = 0;
     for (let i = 0; i < lines.length; i++) {
       if (start <= charCount + lines[i].length) { currentLineIdx = i; break; }
       charCount += lines[i].length + 1;
     }
-    const formatted = formatTree(editor.value);
-    const mapInfo = formatted.lineToNodeMap[currentLineIdx] || (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { nodeIndex: 0 });
-    const nodeIdx = mapInfo ? mapInfo.nodeIndex : 0;
-    
+    const visible = getVisibleNodes();
+    const formatted = formatTreeFromNodes(visible);
+    const mapInfo = formatted.lineToNodeMap[currentLineIdx] || (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { visibleIndex: 0 });
+    const visIdx = mapInfo ? mapInfo.visibleIndex : 0;
+    const visNode = visible[visIdx] || visible[0];
+    const masterIdx = visNode ? visNode.masterIndex : 0;
+
     let contentOffset = 0;
     for (let i = 0; i < currentLineIdx; i++) {
-      if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].nodeIndex === nodeIdx) contentOffset += parseLine(lines[i]).content.length + 1;
+      if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].visibleIndex === visIdx) {
+        contentOffset += parseLine(lines[i]).content.length + 1;
+      }
     }
     const curParsed = parseLine(lines[currentLineIdx] || '');
     contentOffset += Math.max(0, (start - charCount) - curParsed.contentStart);
-    return { nodeIndex: nodeIdx, contentOffset, lineIndex: currentLineIdx, lineOffset: start - charCount, rawParsed: curParsed };
+
+    return { visibleIndex: visIdx, masterIndex: masterIdx, contentOffset, lineIndex: currentLineIdx, lineOffset: start - charCount, rawParsed: curParsed };
   }
 
-  function restoreCursorForNode(formatted, targetNodeIdx, contentOffset) {
+  function getVisibleMasterIdx(targetMasterIdx) {
+    const visible = getVisibleNodes();
+    for (let v of visible) {
+      if (v.masterIndex === targetMasterIdx) return targetMasterIdx;
+    }
+    let cur = targetMasterIdx;
+    while (cur >= 0) {
+      if (visible.some(v => v.masterIndex === cur)) return cur;
+      cur--;
+    }
+    return 0;
+  }
+
+  function restoreCursorForMasterNode(targetMasterIdx, contentOffset) {
+    const visMasterIdx = getVisibleMasterIdx(targetMasterIdx);
+    const visible = getVisibleNodes();
+    const visIdx = visible.findIndex(v => v.masterIndex === visMasterIdx);
+    if (visIdx === -1) return;
+
+    const formatted = formatTreeFromNodes(visible);
     const lines = formatted.text.split('\n');
     let accum = 0, targetLineIdx = 0, lineContentOffset = 0;
+
     for (let i = 0; i < lines.length; i++) {
       const mapInfo = formatted.lineToNodeMap[i];
-      if (mapInfo && mapInfo.nodeIndex === targetNodeIdx) {
+      if (mapInfo && mapInfo.visibleIndex === visIdx) {
         const p = parseLine(lines[i]);
-        if (contentOffset <= accum + p.content.length || i === lines.length - 1 || (formatted.lineToNodeMap[i + 1] && formatted.lineToNodeMap[i + 1].nodeIndex !== targetNodeIdx)) {
+        if (contentOffset <= accum + p.content.length || i === lines.length - 1 || (formatted.lineToNodeMap[i + 1] && formatted.lineToNodeMap[i + 1].visibleIndex !== visIdx)) {
           targetLineIdx = i; lineContentOffset = Math.max(0, contentOffset - accum); break;
         }
         accum += p.content.length + 1;
       }
     }
+
     let pos = 0;
     for (let j = 0; j < targetLineIdx && j < lines.length; j++) pos += lines[j].length + 1;
     const targetParsed = parseLine(lines[targetLineIdx] || '');
     editor.selectionStart = editor.selectionEnd = Math.min(formatted.text.length, Math.max(0, pos + targetParsed.contentStart + Math.min(targetParsed.content.length, lineContentOffset)));
   }
 
-  let inputTimeout;
   editor.addEventListener('input', () => {
-    const state = getCurrentNodeAndOffset();
-    const rawNodes = parseDocument(editor.value);
-    const activeNode = rawNodes[state.nodeIndex];
+    const state = getCurrentState();
+    const visible = getVisibleNodes();
+    const formatted = formatTreeFromNodes(visible);
+    const parsedLines = editor.value.split('\n');
 
-    if (activeNode && activeNode.content.startsWith(' ') && state.contentOffset === 1) {
-      activeNode.depth += 1;
-      activeNode.content = activeNode.content.substring(1); 
-      const fmt = formatTreeFromNodes(rawNodes);
-      applyFormatted(fmt);
-      restoreCursorForNode(fmt, state.nodeIndex, 0);
-      historyMgr.save(editor.value, editor.selectionStart);
-      triggerAutoSave();
-      return; 
+    for (let i = 0; i < formatted.lineToNodeMap.length; i++) {
+      const mapInfo = formatted.lineToNodeMap[i];
+      if (mapInfo && mapInfo.isFirstLine) {
+        const visIdx = mapInfo.visibleIndex;
+        const masterIdx = mapInfo.masterIndex;
+        let text = parseLine(parsedLines[i]).content;
+        let k = i + 1;
+        while (k < parsedLines.length && formatted.lineToNodeMap[k] && formatted.lineToNodeMap[k].visibleIndex === visIdx) {
+          text += ' ' + parseLine(parsedLines[k]).content;
+          k++;
+        }
+        if (masterNodes[masterIdx]) {
+          masterNodes[masterIdx].content = text;
+        }
+      }
     }
 
-    const formatted = formatTree(editor.value);
-    if (formatted.text !== editor.value) {
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex, state.contentOffset);
-      historyMgr.save(editor.value, editor.selectionStart);
-      triggerAutoSave();
-    } else {
-      renderOverlay(formatted);
-      clearTimeout(inputTimeout);
-      inputTimeout = setTimeout(() => {
-        historyMgr.save(editor.value, editor.selectionStart);
-        triggerAutoSave();
-      }, 300);
+    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content.startsWith(' ') && state.contentOffset === 1) {
+      masterNodes[state.masterIndex].depth += 1;
+      masterNodes[state.masterIndex].content = masterNodes[state.masterIndex].content.substring(1);
+      renderAndSave(state.masterIndex, 0);
+      return;
     }
+
+    renderAndSave(state.masterIndex, state.contentOffset);
   });
 
   function manageToolbarVisibility() {
-    const state = getCurrentNodeAndOffset();
+    const state = getCurrentState();
     if (document.activeElement !== editor || state.lineOffset < state.rawParsed.contentStart) {
       if(window.innerWidth < 768) toolbar.classList.remove('visible');
       editor.blur(); 
@@ -684,182 +768,170 @@
 
   document.addEventListener('selectionchange', () => {
     if (document.activeElement !== editor) return;
-    const state = getCurrentNodeAndOffset();
-    let nodes = parseDocument(editor.value);
-    let needsApply = false, targetOffset = state.contentOffset, targetNodeIdx = state.nodeIndex;
+    const state = getCurrentState();
+    let needsApply = false, targetOffset = state.contentOffset, targetMasterIdx = state.masterIndex;
 
     manageToolbarVisibility();
 
-    if (state.nodeIndex !== lastActiveNodeIdx && lastActiveNodeIdx !== -1) {
-      if (nodes[lastActiveNodeIdx] && nodes[lastActiveNodeIdx].content !== '?') { finalizeNode(nodes, lastActiveNodeIdx); needsApply = true; }
-    }
-
-    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content === '?') {
-      if (state.nodeIndex === 0) {
-        for (let i = 0; i < nodes.length; i++) nodes[i].depth++;
-        nodes.unshift({ depth: 0, content: '?' });
-        if(nodes[1]) nodes[1].content = '';
-        targetNodeIdx = 1; targetOffset = 0; needsApply = true;
-      } else {
-        nodes[state.nodeIndex].content = '';
-        nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth, content: '?' });
-        targetNodeIdx = state.nodeIndex; targetOffset = 0; needsApply = true;
+    if (state.masterIndex !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
+      if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') { 
+        finalizeNode(masterNodes, lastActiveMasterIdx); 
+        needsApply = true; 
       }
     }
 
-    const prevActiveNodeIdx = lastActiveNodeIdx;
-    lastActiveNodeIdx = targetNodeIdx;
+    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content === '?') {
+      if (state.masterIndex === 0) {
+        for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++;
+        masterNodes.unshift({ depth: 0, content: '?', folded: false });
+        if(masterNodes[1]) masterNodes[1].content = '';
+        targetMasterIdx = 1; targetOffset = 0; needsApply = true;
+      } else {
+        masterNodes[state.masterIndex].content = '';
+        masterNodes.splice(state.masterIndex + 1, 0, { depth: masterNodes[state.masterIndex].depth, content: '?', folded: false });
+        targetMasterIdx = state.masterIndex; targetOffset = 0; needsApply = true;
+      }
+    }
+
+    const prevActiveMasterIdx = lastActiveMasterIdx;
+    lastActiveMasterIdx = targetMasterIdx;
 
     if (needsApply) {
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, targetNodeIdx, targetOffset);
-      historyMgr.save(editor.value, editor.selectionStart);
-      triggerAutoSave();
-    } else if (prevActiveNodeIdx !== targetNodeIdx) {
-      renderOverlay(formatTreeFromNodes(nodes)); 
+      renderAndSave(targetMasterIdx, targetOffset);
+    } else if (prevActiveMasterIdx !== targetMasterIdx) {
+      renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
     }
   });
 
   editor.addEventListener('blur', () => {
-    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
-    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content !== '?') finalizeNode(nodes, state.nodeIndex);
-    lastActiveNodeIdx = -1;
-    applyFormatted(formatTreeFromNodes(nodes));
-    historyMgr.save(editor.value, editor.selectionStart);
-    triggerAutoSave();
+    const state = getCurrentState();
+    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex);
+    lastActiveMasterIdx = -1;
+    renderAndSave();
   });
 
   editor.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); historyMgr.undo(editor, () => renderOverlay(formatTree(editor.value))); return; }
-    if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) { e.preventDefault(); historyMgr.redo(editor, () => renderOverlay(formatTree(editor.value))); return; }
+    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); historyMgr.undo((pos) => renderAndSave()); return; }
+    if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) { e.preventDefault(); historyMgr.redo((pos) => renderAndSave()); return; }
     
     if (editor.selectionStart !== editor.selectionEnd) return;
-    const state = getCurrentNodeAndOffset(), nodes = parseDocument(editor.value), node = nodes[state.nodeIndex];
+    const state = getCurrentState(), node = masterNodes[state.masterIndex];
     if (!node) return;
-    let modified = false;
 
     if (e.key === ' ' && node.content === '-' && state.contentOffset === 1) {
       e.preventDefault(); node.content = '';
-      nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
-      const fmt = formatTreeFromNodes(nodes); 
-      lastActiveNodeIdx = state.nodeIndex + 1;
-      applyFormatted(fmt); 
-      restoreCursorForNode(fmt, lastActiveNodeIdx, 0);
-      renderOverlay(fmt);
-      modified = true;
+      masterNodes.splice(state.masterIndex + 1, 0, { depth: node.depth, content: '', folded: false });
+      lastActiveMasterIdx = state.masterIndex + 1;
+      renderAndSave(lastActiveMasterIdx, 0);
     } else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) {
-      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
-      const end = getSubtreeEnd(nodes, state.nodeIndex);
-      for(let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
-      const fmt = formatTreeFromNodes(nodes); 
-      applyFormatted(fmt); 
-      restoreCursorForNode(fmt, state.nodeIndex, 0); 
-      renderOverlay(fmt);
-      modified = true;
+      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
+      const end = getSubtreeEnd(masterNodes, state.masterIndex);
+      for(let i = state.masterIndex; i < end; i++) masterNodes[i].depth++;
+      renderAndSave(state.masterIndex, 0);
     } else if (e.key === 'Enter') {
-      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
-      nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
-      const fmt = formatTreeFromNodes(nodes); 
-      lastActiveNodeIdx = state.nodeIndex + 1;
-      applyFormatted(fmt); 
-      restoreCursorForNode(fmt, lastActiveNodeIdx, 0);
-      renderOverlay(fmt);
-      modified = true;
+      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
+      let insertIdx = state.masterIndex + 1;
+      if (node.folded && hasChildren(masterNodes, state.masterIndex)) {
+        insertIdx = getSubtreeEnd(masterNodes, state.masterIndex);
+      }
+      masterNodes.splice(insertIdx, 0, { depth: node.depth, content: '', folded: false });
+      lastActiveMasterIdx = insertIdx;
+      renderAndSave(lastActiveMasterIdx, 0);
     } else if (e.key === 'Tab') {
-      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
-      const end = getSubtreeEnd(nodes, state.nodeIndex);
-      if (e.shiftKey && node.depth > 0) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--; } 
-      else if (!e.shiftKey) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth++; }
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); renderOverlay(fmt); modified = true;
+      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
+      const end = getSubtreeEnd(masterNodes, state.masterIndex);
+      if (e.shiftKey && node.depth > 0) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--; } 
+      else if (!e.shiftKey) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth++; }
+      renderAndSave(state.masterIndex, state.contentOffset);
     } else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) {
-      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
-      const end = getSubtreeEnd(nodes, state.nodeIndex);
-      for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--;
-      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); renderOverlay(fmt); modified = true;
-    }
-    
-    if (modified) {
-        historyMgr.save(editor.value, editor.selectionStart);
-        triggerAutoSave();
+      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
+      const end = getSubtreeEnd(masterNodes, state.masterIndex);
+      for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--;
+      renderAndSave(state.masterIndex, 0);
     }
   });
 
-  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(editor.value, editor.selectionStart); triggerAutoSave(); };
+  function toggleFold(masterIdx) {
+    if (masterIdx < 0 || masterIdx >= masterNodes.length) return;
+    if (!hasChildren(masterNodes, masterIdx)) return;
+    masterNodes[masterIdx].folded = !masterNodes[masterIdx].folded;
+    renderAndSave(masterIdx);
+  }
+
+  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(masterNodes, editor.selectionStart); triggerAutoSave(); };
 
   document.getElementById('inspireBtn').onclick = wrapAction(() => {
     inspireActive = !inspireActive;
     document.getElementById('inspireBtn').classList.toggle('active', inspireActive);
-    let nodes = parseDocument(editor.value);
     if (inspireActive) {
-      const newNodes = [nodes[0] || { depth: 0, content: '?' }];
-      for (let i = 1; i < nodes.length; i++) {
-        if(nodes[i].content === '?') continue;
-        newNodes.push(nodes[i]);
-        let nextDepth = i + 1 < nodes.length ? nodes[i+1].depth : 0;
-        for (let d = nodes[i].depth; d > nextDepth; d--) newNodes.push({ depth: d, content: '?' });
+      const newNodes = [masterNodes[0] || { depth: 0, content: '?', folded: false }];
+      for (let i = 1; i < masterNodes.length; i++) {
+        if(masterNodes[i].content === '?') continue;
+        newNodes.push(masterNodes[i]);
+        let nextDepth = i + 1 < masterNodes.length ? masterNodes[i+1].depth : 0;
+        for (let d = masterNodes[i].depth; d > nextDepth; d--) newNodes.push({ depth: d, content: '?', folded: false });
       }
-      nodes = newNodes;
+      masterNodes = newNodes;
     } else {
-      nodes = nodes.filter((n, i) => i === 0 || n.content.trim() !== '?');
+      masterNodes = masterNodes.filter((n, i) => i === 0 || n.content.trim() !== '?');
     }
-    applyFormatted(formatTreeFromNodes(nodes)); editor.focus();
+    renderAndSave(0, 0); editor.focus();
   });
 
   document.getElementById('newParentBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
-    if (!nodes[state.nodeIndex]) return;
-    const end = getSubtreeEnd(nodes, state.nodeIndex);
-    for (let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
-    nodes.splice(state.nodeIndex, 0, { depth: nodes[state.nodeIndex].depth - 1, content: '' });
-    lastActiveNodeIdx = state.nodeIndex;
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); renderOverlay(fmt); editor.focus();
+    const state = getCurrentState();
+    if (!masterNodes[state.masterIndex]) return;
+    const end = getSubtreeEnd(masterNodes, state.masterIndex);
+    for (let i = state.masterIndex; i < end; i++) masterNodes[i].depth++;
+    masterNodes.splice(state.masterIndex, 0, { depth: masterNodes[state.masterIndex].depth - 1, content: '', folded: false });
+    lastActiveMasterIdx = state.masterIndex;
+    renderAndSave(state.masterIndex, 0); editor.focus();
   });
 
   document.getElementById('newChildBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
-    if (!nodes[state.nodeIndex]) return;
-    nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth + 1, content: '' });
-    lastActiveNodeIdx = state.nodeIndex + 1;
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, lastActiveNodeIdx, 0); renderOverlay(fmt); editor.focus();
+    const state = getCurrentState();
+    if (!masterNodes[state.masterIndex]) return;
+    masterNodes[state.masterIndex].folded = false;
+    masterNodes.splice(state.masterIndex + 1, 0, { depth: masterNodes[state.masterIndex].depth + 1, content: '', folded: false });
+    lastActiveMasterIdx = state.masterIndex + 1;
+    renderAndSave(lastActiveMasterIdx, 0); editor.focus();
   });
   
   document.getElementById('foldBtn').onclick = wrapAction(() => {
-    const state = getCurrentNodeAndOffset();
-    if(foldedNodes.has(state.nodeIndex)) foldedNodes.delete(state.nodeIndex);
-    else foldedNodes.add(state.nodeIndex);
-    const fmt = formatTree(editor.value); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); editor.focus();
+    const state = getCurrentState();
+    toggleFold(state.masterIndex);
+    editor.focus();
   });
 
   document.getElementById('deleteNodeBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset(), idx = state.nodeIndex;
-    if (nodes.length <= 1) nodes[0].content = '?';
-    else { const end = getSubtreeEnd(nodes, idx); nodes.splice(idx, end - idx); if(!nodes.length) nodes.push({depth:0, content:'?'}); }
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, Math.min(idx, nodes.length - 1), 0); editor.focus();
+    const state = getCurrentState(), idx = state.masterIndex;
+    if (masterNodes.length <= 1) masterNodes[0] = { depth: 0, content: '?', folded: false };
+    else { const end = getSubtreeEnd(masterNodes, idx); masterNodes.splice(idx, end - idx); if(!masterNodes.length) masterNodes.push({depth:0, content:'?', folded: false}); }
+    renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus();
   });
 
   document.getElementById('deletePromoteBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex;
-    if (!nodes[idx] || nodes[idx].depth === 0) return;
-    const end = getSubtreeEnd(nodes, idx); for (let i = idx + 1; i < end; i++) nodes[i].depth--;
-    nodes.splice(idx, 1);
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, Math.min(idx, nodes.length - 1), 0); editor.focus();
+    const idx = getCurrentState().masterIndex;
+    if (!masterNodes[idx] || masterNodes[idx].depth === 0) return;
+    const end = getSubtreeEnd(masterNodes, idx); for (let i = idx + 1; i < end; i++) masterNodes[i].depth--;
+    masterNodes.splice(idx, 1);
+    renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus();
   });
 
   document.getElementById('moveUpBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex, end = getSubtreeEnd(nodes, idx);
-    let prevStart = idx - 1; while (prevStart >= 0 && nodes[prevStart].depth > nodes[idx].depth) prevStart--;
-    if (prevStart < 0 || nodes[prevStart].depth !== nodes[idx].depth) return;
-    nodes.splice(prevStart, 0, ...nodes.splice(idx, end - idx));
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, prevStart, 0); editor.focus();
+    const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx);
+    let prevStart = idx - 1; while (prevStart >= 0 && masterNodes[prevStart].depth > masterNodes[idx].depth) prevStart--;
+    if (prevStart < 0 || masterNodes[prevStart].depth !== masterNodes[idx].depth) return;
+    masterNodes.splice(prevStart, 0, ...masterNodes.splice(idx, end - idx));
+    renderAndSave(prevStart, 0); editor.focus();
   });
 
   document.getElementById('moveDownBtn').onclick = wrapAction(() => {
-    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex, end = getSubtreeEnd(nodes, idx);
-    if (end >= nodes.length || nodes[end].depth !== nodes[idx].depth) return;
-    const nextEnd = getSubtreeEnd(nodes, end);
-    nodes.splice(idx + (nextEnd - end), 0, ...nodes.splice(idx, end - idx));
-    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, idx + (nextEnd - end), 0); editor.focus();
+    const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx);
+    if (end >= masterNodes.length || masterNodes[end].depth !== masterNodes[idx].depth) return;
+    const nextEnd = getSubtreeEnd(masterNodes, end);
+    masterNodes.splice(idx + (nextEnd - end), 0, ...masterNodes.splice(idx, end - idx));
+    renderAndSave(idx + (nextEnd - end), 0); editor.focus();
   });
 
   // Save/Load logic
@@ -884,20 +956,31 @@
         document.getElementById('closeModalBtn').click(); 
     }
   };
+
+  function loadDocByName(docKey) {
+    currentDocName = docKey.replace('tree_doc_', '');
+    const raw = localStorage.getItem(docKey);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) masterNodes = parsed;
+        else masterNodes = parseDocumentToNodes(raw);
+      } catch(e) {
+        masterNodes = parseDocumentToNodes(raw);
+      }
+    }
+    renderAndSave();
+    setTimeout(() => {
+        editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
+        editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
+    }, 0);
+    localStorage.setItem('last_open_doc', currentDocName);
+  }
+
   document.getElementById('loadDocBtn').onclick = () => {
     const val = document.getElementById('savedList').value;
     if(val) { 
-        currentDocName = val.replace('tree_doc_', '');
-        editor.value = localStorage.getItem(val); 
-        foldedNodes.clear(); 
-        applyFormatted(formatTree(editor.value)); 
-        
-        setTimeout(() => {
-            editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
-            editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
-        }, 0);
-        
-        localStorage.setItem('last_open_doc', currentDocName);
+        loadDocByName(val);
         document.getElementById('closeModalBtn').click(); 
     }
   };
@@ -911,33 +994,29 @@
     }
   };
   document.getElementById('importExportBtn').onclick = () => {
-    const text = editor.value;
+    const text = formatTreeFromNodes(getVisibleNodes()).text;
     navigator.clipboard.writeText(text).then(() => {
-        const paste = prompt("Exported to clipboard! Paste here to Import, or click Cancel:");
-        if (paste) { editor.value = paste; foldedNodes.clear(); applyFormatted(formatTree(editor.value)); triggerAutoSave(); }
+        const paste = prompt("Exported to clipboard! Paste plain text here to Import (or click Cancel):");
+        if (paste) {
+          masterNodes = parseDocumentToNodes(paste);
+          renderAndSave(0, 0);
+        }
     });
   };
 
   // Initialization & Load State
-  const INITIAL_NODES = [{ depth: 0, content: '?' }];
   const savedDoc = localStorage.getItem('last_open_doc');
-  
   if (savedDoc && localStorage.getItem('tree_doc_' + savedDoc)) {
-      currentDocName = savedDoc;
-      editor.value = localStorage.getItem('tree_doc_' + savedDoc);
-      applyFormatted(formatTree(editor.value));
-      setTimeout(() => {
-          editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
-          editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
-      }, 0);
+      loadDocByName('tree_doc_' + savedDoc);
   } else {
-      applyFormatted(formatTreeFromNodes(INITIAL_NODES));
+      masterNodes = [{ depth: 0, content: '?', folded: false }];
+      renderAndSave();
   }
 
   if (document.fonts && document.fonts.ready) { 
-      document.fonts.ready.then(() => { fontMetrics = null; applyFormatted(formatTree(editor.value)); historyMgr.save(editor.value, 0); }); 
+      document.fonts.ready.then(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }); 
   } else {
-      setTimeout(() => { fontMetrics = null; applyFormatted(formatTree(editor.value)); historyMgr.save(editor.value, 0); }, 200);
+      setTimeout(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }, 200);
   }
 </script>
 
