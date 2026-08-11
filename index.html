@@ -207,6 +207,11 @@
       overflow-y: auto;
     }
     .toolbar.visible { display: flex; }
+
+    /* ADD THIS BLOCK: Adjust padding-top to safely clear the wrapped buttons */
+    .editor, .editor-overlay {
+      padding-top: 220px; 
+    }
   }
 </style>
 </head>
