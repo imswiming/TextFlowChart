@@ -2,149 +2,40 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Tree Hierarchy Text Editor</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;600&display=swap');
 
   * { box-sizing: border-box; font-family: 'Roboto', sans-serif; }
 
-  body {
+  body, html {
     background-color: #0f172a;
     color: #f8fafc;
     margin: 0;
-    padding: 40px 20px;
-    display: flex;
-    justify-content: center;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
 
   .container {
     width: 100%;
-    max-width: 900px;
+    height: 100%;
     background: #1e293b;
-    padding: 28px;
-    border-radius: 12px;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-    border: 1px solid #334155;
-  }
-
-  .header {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 16px;
-  }
-
-  h2 { margin: 0 0 6px 0; color: #f8fafc; font-size: 22px; }
-
-  .badge {
-    font-size: 12px;
-    background: #0284c7;
-    color: #ffffff;
-    padding: 4px 10px;
-    border-radius: 9999px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-  }
-
-  p.instructions {
-    margin-top: 0;
-    margin-bottom: 20px;
-    color: #94a3b8;
-    font-size: 14px;
-    line-height: 1.6;
-    background: #0f172a;
-    padding: 14px 16px;
-    border-radius: 8px;
-    border-left: 4px solid #38bdf8;
-  }
-
-  p.instructions code {
-    background: #334155;
-    color: #38bdf8;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 13px;
-  }
-
-  .editor-wrap {
-    position: relative;
-    width: 100%;
-  }
-
-  .editor, .editor-overlay {
-    width: 100%;
-    height: 480px;
-    margin: 0;
-
-    font-family: 'Roboto', sans-serif;
-    font-size: 14px;
-    line-height: 2;            
-    letter-spacing: 0;
-    font-variant-ligatures: none;
-    -webkit-font-feature-settings: "liga" 0, "calt" 0;
-    font-feature-settings: "liga" 0, "calt" 0;
-    tab-size: 8;
-
-    padding: 18px 16px;
-    border-radius: 8px;
-    white-space: pre;
-    box-sizing: border-box;
-  }
-
-  .editor {
-    position: relative;
-    z-index: 2;
-    color: #f8fafc;
-    background-color: transparent;
-    border: 1px solid transparent; 
-    overflow-x: auto;
-    overflow-y: auto;
-    resize: vertical;
-  }
-
-  .editor:focus { outline: none; }
-
-  .editor-overlay {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 1;
-    background-color: #0f172a;
-    border: 1px solid #334155;
-    overflow: hidden;
-    pointer-events: none;
-  }
-
-  .editor:focus ~ .editor-overlay {
-    border-color: #38bdf8;
-    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
-  }
-
-  .overlay-content {
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-
-  .node-bubble {
-    position: absolute;
-    border: 1px solid #94a3b8;
-    border-radius: 10px;
-    background-color: rgba(148, 163, 184, 0.10);
-  }
-
-  .node-bubble.assumption {
-    border-color: #f472b6;
-    background-color: rgba(244, 114, 182, 0.18);
+    flex-direction: column;
   }
 
   .toolbar {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 14px;
+    padding: 10px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    z-index: 10;
+    transition: opacity 0.2s, max-height 0.2s;
   }
 
   .toolbar button {
@@ -162,33 +53,148 @@
 
   .toolbar button:hover { background: #3f5165; }
   .toolbar button:active { background: #29394d; }
-
   .toolbar button.danger { border-color: #7f1d1d; }
   .toolbar button.danger:hover { background: #4c1d1d; }
-
-  /* New Active State for the Inspire Button */
   .toolbar button.active {
     background: #0284c7;
     border-color: #38bdf8;
     color: #ffffff;
+  }
+
+  .editor-wrap {
+    position: relative;
+    width: 100%;
+    flex-grow: 1;
+    overflow: hidden;
+  }
+
+  .editor, .editor-overlay {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    font-family: 'Roboto', sans-serif;
+    font-size: 14px;
+    line-height: 2;            
+    letter-spacing: 0;
+    font-variant-ligatures: none;
+    -webkit-font-feature-settings: "liga" 0, "calt" 0;
+    font-feature-settings: "liga" 0, "calt" 0;
+    tab-size: 8;
+    padding: 18px 16px;
+    border-radius: 0;
+    white-space: pre;
+    box-sizing: border-box;
+  }
+
+  .editor {
+    position: absolute;
+    top: 0; left: 0;
+    z-index: 2;
+    color: transparent;
+    caret-color: #f8fafc;
+    background-color: transparent;
+    border: none;
+    overflow-x: auto;
+    overflow-y: auto;
+    resize: none;
+  }
+
+  .editor:focus { outline: none; }
+
+  .editor-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 1;
+    background-color: #0f172a;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .overlay-content {
+    position: absolute;
+    top: 0; left: 0;
+    color: #f8fafc;
+  }
+
+  .node-bubble {
+    position: absolute;
+    border: 1px solid #94a3b8;
+    border-radius: 10px;
+    background-color: rgba(148, 163, 184, 0.10);
+    transition: background-color 0.1s;
+  }
+
+  .node-bubble.active-node {
+    background-color: rgba(56, 189, 248, 0.2); 
+    border-color: #38bdf8;
+  }
+
+  .node-bubble.assumption {
+    border-color: #f472b6;
+    background-color: rgba(244, 114, 182, 0.18);
+  }
+
+  .node-bubble.active-node.assumption {
+    background-color: rgba(244, 114, 182, 0.4);
+  }
+  
+  .fold-indicator {
+    position: absolute;
+    right: -16px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: #38bdf8;
+  }
+
+  /* Modals */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    display: none;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal {
+    background: #1e293b;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #334155;
+    width: 300px;
+    max-width: 90%;
+  }
+  .modal h3 { margin-top: 0; }
+  .modal button, .modal select { width: 100%; margin-top: 10px; padding: 8px; }
+
+  @media (max-width: 768px) {
+    .toolbar {
+      display: none;
+    }
+    .toolbar.visible {
+      display: flex;
+    }
   }
 </style>
 </head>
 <body>
 
 <div class="container">
-  <div class="header">
-    <div><h2>Tree Hierarchy Editor</h2></div>
-    <span class="badge">Drawn Connectors • Auto Wrap</span>
+  <div class="toolbar" id="toolbar">
+    <button id="openBtn" type="button">Open / Save</button>
+    <button id="importExportBtn" type="button">Import / Export</button>
+    <button id="inspireBtn" type="button">Inspire ✨</button>
+    <button id="undoBtn" type="button">Undo</button>
+    <button id="redoBtn" type="button">Redo</button>
+    <button id="newParentBtn" type="button">New Parent</button>
+    <button id="newChildBtn" type="button">New Child</button>
+    <button id="foldBtn" type="button">Fold / Unfold</button>
+    <button id="deleteNodeBtn" type="button" class="danger">Delete</button>
+    <button id="deletePromoteBtn" type="button" class="danger">Promote</button>
+    <button id="moveUpBtn" type="button">Up</button>
+    <button id="moveDownBtn" type="button">Down</button>
   </div>
-
-  <p class="instructions">
-    • <code>Tab</code> / <code>Shift+Tab</code> indent or outdent the current item.<br>
-    • <code>Space</code> at the very start of a line also indents it.<br>
-    • <code>Enter</code> always creates a new item at the same level.<br>
-    • Typing <code>a, </code> / <code>A, </code> at the start of an item becomes <code>Assumption: </code>.<br>
-    • <code>Ctrl+Z</code> / <code>Ctrl+Shift+Z</code> to Undo and Redo.
-  </p>
 
   <div class="editor-wrap">
     <textarea id="editor" class="editor" spellcheck="false"></textarea>
@@ -196,16 +202,16 @@
       <div id="overlay-content" class="overlay-content"></div>
     </div>
   </div>
+</div>
 
-  <div class="toolbar">
-    <button id="inspireBtn" type="button">Inspire ✨</button>
-    <button id="undoBtn" type="button">Undo</button>
-    <button id="redoBtn" type="button">Redo</button>
-    <button id="newParentBtn" type="button">New Parent</button>
-    <button id="deleteNodeBtn" type="button" class="danger">Delete Node</button>
-    <button id="deletePromoteBtn" type="button" class="danger">Delete (Promote)</button>
-    <button id="moveUpBtn" type="button">Move Up</button>
-    <button id="moveDownBtn" type="button">Move Down</button>
+<div class="modal-overlay" id="saveModal">
+  <div class="modal">
+    <h3>Save / Load</h3>
+    <select id="savedList"></select>
+    <button id="loadDocBtn">Load Selected</button>
+    <button id="saveDocBtn">Save Current (New)</button>
+    <button id="deleteDocBtn" class="danger">Delete Selected</button>
+    <button id="closeModalBtn">Cancel</button>
   </div>
 </div>
 
@@ -213,14 +219,15 @@
   const editor = document.getElementById('editor');
   const overlay = document.getElementById('overlay');
   const overlayContent = document.getElementById('overlay-content');
+  const toolbar = document.getElementById('toolbar');
 
   const MAX_CONTENT_LENGTH = 50;   
   const INDENT_WIDTH = 12; 
   const NODE_MARK = '\u200B';      
 
   let inspireActive = false;
-
-  // ---------- History Manager (Undo / Redo) ----------
+  let foldedNodes = new Set();
+  let lastActiveNodeIdx = -1;
 
   class HistoryManager {
     constructor() {
@@ -231,7 +238,7 @@
     save(text, pos) {
       if (!this.isTracking) return;
       if (this.undoStack.length === 0 || this.undoStack[this.undoStack.length - 1].text !== text) {
-        this.undoStack.push({ text, pos });
+        this.undoStack.push({ text, pos, folded: new Set(foldedNodes) });
         this.redoStack = [];
       }
     }
@@ -241,6 +248,7 @@
         this.redoStack.push(this.undoStack.pop());
         const state = this.undoStack[this.undoStack.length - 1];
         editorElem.value = state.text;
+        foldedNodes = new Set(state.folded);
         editorElem.selectionStart = editorElem.selectionEnd = state.pos;
         callback();
         this.isTracking = true;
@@ -252,6 +260,7 @@
         const state = this.redoStack.pop();
         this.undoStack.push(state);
         editorElem.value = state.text;
+        foldedNodes = new Set(state.folded);
         editorElem.selectionStart = editorElem.selectionEnd = state.pos;
         callback();
         this.isTracking = true;
@@ -260,28 +269,15 @@
   }
   const historyMgr = new HistoryManager();
 
-  // ---------- line <-> node parsing ----------
-
   function parseLine(rawLine) {
     const unit = ' '.repeat(INDENT_WIDTH);
-    let depth = 0;
-    let offset = 0;
-    while (rawLine.substr(offset, INDENT_WIDTH) === unit) {
-      depth++;
-      offset += INDENT_WIDTH;
-    }
+    let depth = 0, offset = 0;
+    while (rawLine.substr(offset, INDENT_WIDTH) === unit) { depth++; offset += INDENT_WIDTH; }
     const prefixLength = offset; 
     const markerLength = rawLine[offset] === NODE_MARK ? 1 : 0;
     const contentStart = offset + markerLength; 
     const content = rawLine.substring(contentStart);
-    return {
-      depth,
-      content,
-      prefixLength,
-      markerLength,
-      contentStart,
-      isNodeConnector: markerLength === 1
-    };
+    return { depth, content, prefixLength, markerLength, contentStart, isNodeConnector: markerLength === 1 };
   }
 
   function parseDocument(text) {
@@ -291,20 +287,14 @@
       if (rawLines[i].length === 0) continue; 
       const parsed = parseLine(rawLines[i]);
       const prevNode = nodes.length ? nodes[nodes.length - 1] : null;
-      const isContinuation = prevNode && prevNode.depth === parsed.depth && !parsed.isNodeConnector;
-      if (isContinuation) {
+      if (prevNode && prevNode.depth === parsed.depth && !parsed.isNodeConnector) {
         prevNode.content += (prevNode.content ? ' ' : '') + parsed.content;
       } else {
-        nodes.push({ depth: parsed.depth, content: parsed.content });
+        nodes.push({ depth: parsed.depth, content: parsed.content, id: nodes.length });
       }
     }
-    if (nodes.length === 0) nodes.push({ depth: 0, content: '' });
+    if (nodes.length === 0) nodes.push({ depth: 0, content: '?', id: 0 });
     return nodes;
-  }
-
-  function expandAssumption(content) {
-    const match = content.match(/^([Aa],)(\s*)(.*)$/);
-    return match ? `Assumption: ${match[3]}` : content;
   }
 
   function capitalizeFirst(content) {
@@ -315,60 +305,48 @@
   function finalizeNode(nodes, idx) {
     const node = nodes[idx];
     if (!node) return;
-    if (node.depth > 0) {
-      node.content = expandAssumption(node.content);
-    }
+    const match = node.content.match(/^([Aa],)(\s*)(.*)$/);
+    if (match && node.depth > 0) node.content = `Assumption: ${match[3]}`;
     node.content = capitalizeFirst(node.content);
   }
 
   function wrapText(text, maxLen) {
     if (!text || text.length <= maxLen) return [text || ''];
-    const words = text.split(' ');
-    const lines = [];
-    let currentLine = '';
-    for (const word of words) {
-      if (currentLine.length === 0) {
-        if (word.length > maxLen) {
-          let remaining = word;
-          while (remaining.length > maxLen) {
-            lines.push(remaining.substring(0, maxLen));
-            remaining = remaining.substring(maxLen);
-          }
-          currentLine = remaining;
-        } else {
-          currentLine = word;
-        }
-      } else if (currentLine.length + 1 + word.length <= maxLen) {
-        currentLine += ' ' + word;
-      } else {
-        lines.push(currentLine);
-        if (word.length > maxLen) {
-          let remaining = word;
-          while (remaining.length > maxLen) {
-            lines.push(remaining.substring(0, maxLen));
-            remaining = remaining.substring(maxLen);
-          }
-          currentLine = remaining;
-        } else {
-          currentLine = word;
-        }
-      }
+    const words = text.split(' '), lines = [];
+    let cur = '';
+    for (const w of words) {
+      if (!cur) {
+        if (w.length > maxLen) { lines.push(w.substring(0, maxLen)); cur = w.substring(maxLen); }
+        else cur = w;
+      } else if (cur.length + 1 + w.length <= maxLen) cur += ' ' + w;
+      else { lines.push(cur); cur = w; }
     }
-    if (currentLine.length > 0 || lines.length === 0) lines.push(currentLine);
+    if (cur) lines.push(cur);
     return lines;
   }
 
+  function getSubtreeEnd(nodes, idx) {
+    const depth = nodes[idx].depth;
+    let j = idx + 1;
+    while (j < nodes.length && nodes[j].depth > depth) j++;
+    return j;
+  }
+
   function formatTreeFromNodes(nodes) {
-    const formattedLines = [];
-    const lineToNodeMap = [];
-    const rowGuides = [];
+    const formattedLines = [], lineToNodeMap = [], rowGuides = [];
+    let skipUntil = -1;
 
     for (let i = 0; i < nodes.length; i++) {
+      if (skipUntil !== -1 && i < skipUntil) continue;
+      else skipUntil = -1;
+
       const node = nodes[i];
+      if (foldedNodes.has(i)) { skipUntil = getSubtreeEnd(nodes, i); }
+
       const depth = node.depth;
       const wrapped = wrapText(node.content, MAX_CONTENT_LENGTH);
-
       let hasLaterSibling = false;
+      
       for (let j = i + 1; j < nodes.length; j++) {
         if (nodes[j].depth < depth) break;
         if (nodes[j].depth === depth) { hasLaterSibling = true; break; }
@@ -386,53 +364,43 @@
 
       for (let w = 0; w < wrapped.length; w++) {
         const isFirst = w === 0;
-        const line = ' '.repeat(depth * INDENT_WIDTH) + (isFirst ? NODE_MARK : '') + wrapped[w];
-        formattedLines.push(line);
+        formattedLines.push(' '.repeat(depth * INDENT_WIDTH) + (isFirst ? NODE_MARK : '') + wrapped[w]);
         lineToNodeMap.push({ nodeIndex: i, isFirstLine: isFirst });
-
         const segs = ancestorSegs.slice();
         if (depth > 0) {
-          if (isFirst) {
-            segs.push({ col: depth, kind: hasLaterSibling ? 'elbow-tee' : 'elbow-corner' });
-          } else if (hasLaterSibling) {
-            segs.push({ col: depth, kind: 'through' });
-          }
+          if (isFirst) segs.push({ col: depth, kind: hasLaterSibling ? 'elbow-tee' : 'elbow-corner' });
+          else if (hasLaterSibling) segs.push({ col: depth, kind: 'through' });
         }
         rowGuides.push(segs);
       }
 
-      if (i < nodes.length - 1) {
+      let nextVisibleIdx = i + 1;
+      if (foldedNodes.has(i)) nextVisibleIdx = skipUntil;
+
+      if (nextVisibleIdx < nodes.length) {
         formattedLines.push('');
         lineToNodeMap.push(null); 
         const spacerSegs = [];
-        const nextNode = nodes[i + 1];
+        const nextNode = nodes[nextVisibleIdx];
         
         for (let d = 1; d < nextNode.depth; d++) {
           let hasLaterAncestorSibling = false;
-          for (let j = i + 2; j < nodes.length; j++) {
+          for (let j = nextVisibleIdx + 1; j < nodes.length; j++) {
             if (nodes[j].depth < d) break;
             if (nodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
           }
           if (hasLaterAncestorSibling) spacerSegs.push({ col: d, kind: 'through' });
         }
-        if (nextNode.depth > 0) {
-          spacerSegs.push({ col: nextNode.depth, kind: 'through' });
-        }
+        if (nextNode.depth > 0) spacerSegs.push({ col: nextNode.depth, kind: 'through' });
         rowGuides.push(spacerSegs);
       }
     }
-
     return { text: formattedLines.join('\n'), nodes, lineToNodeMap, rowGuides };
   }
 
-  function formatTree(text) {
-    return formatTreeFromNodes(parseDocument(text));
-  }
-
-  // ---------- overlay rendering ----------
+  function formatTree(text) { return formatTreeFromNodes(parseDocument(text)); }
 
   let fontMetrics = null;
-
   function measureText(text) {
     let probe = document.getElementById('probe-span');
     if (!probe) {
@@ -446,20 +414,13 @@
     const cs = getComputedStyle(editor);
     probe.style.fontFamily = cs.fontFamily;
     probe.style.fontSize = cs.fontSize;
-    probe.style.letterSpacing = cs.letterSpacing;
-    probe.style.fontWeight = cs.fontWeight;
-    
-    probe.textContent = text;
+    probe.textContent = text || 'a';
     return probe.getBoundingClientRect().width; 
   }
 
   function computeFontMetrics() {
     const cs = getComputedStyle(editor);
-    return {
-      lineHeight: parseFloat(cs.lineHeight),
-      paddingLeft: parseFloat(cs.paddingLeft),
-      paddingTop: parseFloat(cs.paddingTop)
-    };
+    return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) };
   }
 
   function computeNodeBoxes(formatted) {
@@ -471,578 +432,376 @@
     while (i < lines.length) {
       const mapInfo = lineToNodeMap[i];
       if (!mapInfo) { i++; continue; }
-      const node = nodes[mapInfo.nodeIndex];
       const nodeIndex = mapInfo.nodeIndex;
-
+      const node = nodes[nodeIndex];
       if (!node) { i++; continue; }
 
-      let j = i;
-      let startCol = null;
-      let maxPxWidth = 0;
-      let hasContent = false;
-
+      let j = i, startCol = null, maxPxWidth = 0, hasContent = false;
       while (j < lines.length && lineToNodeMap[j] && lineToNodeMap[j].nodeIndex === nodeIndex) {
         const parsed = parseLine(lines[j]);
         if (startCol === null) startCol = parsed.prefixLength;
-        if (parsed.content.length > 0) hasContent = true;
-        
-        const textWidth = measureText(parsed.content);
-        if (textWidth > maxPxWidth) maxPxWidth = textWidth;
+        if (parsed.content.length > 0) {
+            hasContent = true;
+            maxPxWidth = Math.max(maxPxWidth, measureText(parsed.content));
+        } else if (!hasContent) {
+            maxPxWidth = measureText(' '.repeat(18));
+            hasContent = true; 
+        }
         j++;
       }
-
-      const prefixPxWidth = measureText(' '.repeat(startCol));
-      const isAssumption = node.content.startsWith('Assumption:');
       
-      if (hasContent) {
-        boxes.push({ lineStart: i, lineCount: j - i, prefixPxWidth, maxPxWidth, isAssumption });
-      }
+      let textOverlayContent = '';
+      for(let k=i; k<j; k++) textOverlayContent += (k>i?'\n':'') + parseLine(lines[k]).content;
+
+      boxes.push({ 
+        nodeIndex, lineStart: i, lineCount: j - i, 
+        prefixPxWidth: measureText(' '.repeat(startCol)), 
+        maxPxWidth, isAssumption: node.content.startsWith('Assumption:'),
+        isFolded: foldedNodes.has(nodeIndex),
+        textOverlayContent
+      });
       i = j;
     }
     return boxes;
   }
 
-  function syncOverlayScroll() {
-    overlayContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
-  }
-
+  function syncOverlayScroll() { overlayContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`; }
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   function renderOverlay(formatted) {
     if (!fontMetrics) fontMetrics = computeFontMetrics();
     const { lineHeight, paddingLeft, paddingTop } = fontMetrics;
-
     overlayContent.innerHTML = '';
     const frag = document.createDocumentFragment();
 
     computeNodeBoxes(formatted).forEach(b => {
       const div = document.createElement('div');
-      div.className = b.isAssumption ? 'node-bubble assumption' : 'node-bubble';
-      
+      div.className = 'node-bubble' + (b.isAssumption ? ' assumption' : '') + (b.nodeIndex === lastActiveNodeIdx ? ' active-node' : '');
       div.style.left = (paddingLeft + b.prefixPxWidth - 12) + 'px'; 
       div.style.top = (paddingTop + b.lineStart * lineHeight - 4) + 'px';
       div.style.width = (b.maxPxWidth + 24) + 'px'; 
       div.style.height = (b.lineCount * lineHeight - 3 + 8) + 'px'; 
+      
+      const txt = document.createElement('div');
+      txt.style.position = 'absolute';
+      txt.style.left = '12px'; txt.style.top = '4px';
+      txt.textContent = b.textOverlayContent;
+      div.appendChild(txt);
+
+      if (b.isFolded) {
+        const foldInd = document.createElement('div');
+        foldInd.className = 'fold-indicator';
+        foldInd.textContent = '▶';
+        div.appendChild(foldInd);
+      }
       frag.appendChild(div);
     });
 
-    const rows = formatted.rowGuides.length;
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('width', paddingLeft * 2 + 3000); 
-    svg.setAttribute('height', paddingTop * 2 + rows * lineHeight);
-    svg.style.position = 'absolute';
-    svg.style.left = '0';
-    svg.style.top = '0';
-    svg.style.overflow = 'visible';
+    svg.setAttribute('height', paddingTop * 2 + formatted.rowGuides.length * lineHeight);
+    svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.overflow = 'visible';
 
     const mkLine = (x1, y1, x2, y2) => {
       const l = document.createElementNS(SVG_NS, 'line');
-      l.setAttribute('x1', x1); l.setAttribute('y1', y1);
-      l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-      l.setAttribute('stroke', '#64748b');
-      l.setAttribute('stroke-width', '1.5');
-      l.setAttribute('stroke-linecap', 'round');
+      l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+      l.setAttribute('stroke', '#64748b'); l.setAttribute('stroke-width', '1.5'); l.setAttribute('stroke-linecap', 'round');
       svg.appendChild(l);
     };
 
     formatted.rowGuides.forEach((segs, row) => {
-      const yTop = paddingTop + row * lineHeight;
-      const yMid = yTop + lineHeight / 2;
-      const yBottom = yTop + lineHeight;
-      
+      const yTop = paddingTop + row * lineHeight, yMid = yTop + lineHeight / 2, yBottom = yTop + lineHeight;
       segs.forEach(seg => {
-        const colStartSpaces = (seg.col - 1) * INDENT_WIDTH;
-        const colStartX = paddingLeft + measureText(' '.repeat(colStartSpaces));
-        
+        const colStartX = paddingLeft + measureText(' '.repeat((seg.col - 1) * INDENT_WIDTH));
         const trunkX = colStartX + measureText(' '.repeat(3)); 
+        const armEndX = paddingLeft + measureText(' '.repeat(seg.col * INDENT_WIDTH)) - 14; 
         
-        const childStartSpaces = seg.col * INDENT_WIDTH;
-        const armEndX = paddingLeft + measureText(' '.repeat(childStartSpaces)) - 2;
-        
-        if (seg.kind === 'through') {
-          mkLine(trunkX, yTop, trunkX, yBottom);
-        } else if (seg.kind === 'elbow-tee') {
-          mkLine(trunkX, yTop, trunkX, yMid);
-          mkLine(trunkX, yMid, armEndX, yMid);
-          mkLine(trunkX, yMid, trunkX, yBottom);
-        } else if (seg.kind === 'elbow-corner') {
-          mkLine(trunkX, yTop, trunkX, yMid);
-          mkLine(trunkX, yMid, armEndX, yMid);
-        }
+        if (seg.kind === 'through') mkLine(trunkX, yTop, trunkX, yBottom);
+        else if (seg.kind === 'elbow-tee') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); mkLine(trunkX, yMid, trunkX, yBottom); }
+        else if (seg.kind === 'elbow-corner') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); }
       });
     });
 
-    frag.appendChild(svg);
-    overlayContent.appendChild(frag);
-    syncOverlayScroll();
+    frag.appendChild(svg); overlayContent.appendChild(frag); syncOverlayScroll();
   }
 
-  function applyFormatted(formatted) {
-    editor.value = formatted.text;
-    renderOverlay(formatted);
-  }
+  function applyFormatted(formatted) { editor.value = formatted.text; renderOverlay(formatted); }
 
   editor.addEventListener('scroll', syncOverlayScroll);
-  window.addEventListener('resize', () => {
-    fontMetrics = null;
-    renderOverlay(formatTree(editor.value));
-  });
-
-  // ---------- cursor <-> node/offset mapping ----------
+  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTree(editor.value)); });
 
   function getCurrentNodeAndOffset() {
-    const start = editor.selectionStart;
-    const text = editor.value;
-    const lines = text.split('\n');
-
-    let charCount = 0;
-    let currentLineIdx = 0;
+    const start = editor.selectionStart, lines = editor.value.split('\n');
+    let charCount = 0, currentLineIdx = 0;
     for (let i = 0; i < lines.length; i++) {
       if (start <= charCount + lines[i].length) { currentLineIdx = i; break; }
       charCount += lines[i].length + 1;
     }
-
-    const lineOffset = start - charCount;
-    const formatted = formatTree(text);
-    const mapInfo = formatted.lineToNodeMap[currentLineIdx] || 
-                    (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { nodeIndex: 0 });
-    const nodeIdx = mapInfo.nodeIndex;
-
+    const formatted = formatTree(editor.value);
+    const mapInfo = formatted.lineToNodeMap[currentLineIdx] || (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { nodeIndex: 0 });
+    const nodeIdx = mapInfo ? mapInfo.nodeIndex : 0;
+    
     let contentOffset = 0;
     for (let i = 0; i < currentLineIdx; i++) {
-      if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].nodeIndex === nodeIdx) {
-        const p = parseLine(lines[i]);
-        contentOffset += p.content.length + 1;
-      }
+      if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].nodeIndex === nodeIdx) contentOffset += parseLine(lines[i]).content.length + 1;
     }
     const curParsed = parseLine(lines[currentLineIdx] || '');
-    const lineContentOffset = Math.max(0, lineOffset - curParsed.contentStart);
-    contentOffset += lineContentOffset;
-
-    return { nodeIndex: nodeIdx, contentOffset, lineIndex: currentLineIdx, lineOffset, rawParsed: curParsed };
+    contentOffset += Math.max(0, (start - charCount) - curParsed.contentStart);
+    return { nodeIndex: nodeIdx, contentOffset, lineIndex: currentLineIdx, lineOffset: start - charCount, rawParsed: curParsed };
   }
 
-  function restoreCursorForNode(formattedResult, targetNodeIdx, contentOffset) {
-    const { text, lineToNodeMap } = formattedResult;
-    const lines = text.split('\n');
-
-    let accumContent = 0;
-    let targetLineIdx = 0;
-    let lineContentOffset = 0;
-
+  function restoreCursorForNode(formatted, targetNodeIdx, contentOffset) {
+    const lines = formatted.text.split('\n');
+    let accum = 0, targetLineIdx = 0, lineContentOffset = 0;
     for (let i = 0; i < lines.length; i++) {
-      const mapInfo = lineToNodeMap[i];
+      const mapInfo = formatted.lineToNodeMap[i];
       if (mapInfo && mapInfo.nodeIndex === targetNodeIdx) {
         const p = parseLine(lines[i]);
-        const kContentLen = p.content.length;
-        if (contentOffset <= accumContent + kContentLen || i === lines.length - 1 ||
-           (lineToNodeMap[i + 1] && lineToNodeMap[i + 1].nodeIndex !== targetNodeIdx)) {
-          targetLineIdx = i;
-          lineContentOffset = Math.max(0, contentOffset - accumContent);
-          break;
+        if (contentOffset <= accum + p.content.length || i === lines.length - 1 || (formatted.lineToNodeMap[i + 1] && formatted.lineToNodeMap[i + 1].nodeIndex !== targetNodeIdx)) {
+          targetLineIdx = i; lineContentOffset = Math.max(0, contentOffset - accum); break;
         }
-        accumContent += kContentLen + 1;
+        accum += p.content.length + 1;
       }
     }
-
     let pos = 0;
     for (let j = 0; j < targetLineIdx && j < lines.length; j++) pos += lines[j].length + 1;
     const targetParsed = parseLine(lines[targetLineIdx] || '');
-    pos += targetParsed.contentStart + Math.min(targetParsed.content.length, lineContentOffset);
-
-    const finalPos = Math.min(text.length, Math.max(0, pos));
-    editor.selectionStart = editor.selectionEnd = finalPos;
+    editor.selectionStart = editor.selectionEnd = Math.min(formatted.text.length, Math.max(0, pos + targetParsed.contentStart + Math.min(targetParsed.content.length, lineContentOffset)));
   }
 
   let inputTimeout;
-  function reflow() {
-    const text = editor.value;
-    const nodes = parseDocument(text);
+  editor.addEventListener('input', () => {
     const state = getCurrentNodeAndOffset();
-    const formatted = formatTreeFromNodes(nodes);
-    
-    if (formatted.text !== text) {
+    const rawNodes = parseDocument(editor.value);
+    const activeNode = rawNodes[state.nodeIndex];
+
+    // MOBILE FIX: Detect space inserted at the start of an empty (or any) node 
+    // to handle mobile keyboards where keydown doesn't pass ' '.
+    if (activeNode && activeNode.content.startsWith(' ') && state.contentOffset === 1) {
+      activeNode.depth += 1;
+      activeNode.content = activeNode.content.substring(1); 
+      const fmt = formatTreeFromNodes(rawNodes);
+      applyFormatted(fmt);
+      restoreCursorForNode(fmt, state.nodeIndex, 0);
+      historyMgr.save(editor.value, editor.selectionStart);
+      return; 
+    }
+
+    const formatted = formatTree(editor.value);
+    if (formatted.text !== editor.value) {
       applyFormatted(formatted);
       restoreCursorForNode(formatted, state.nodeIndex, state.contentOffset);
       historyMgr.save(editor.value, editor.selectionStart);
     } else {
       renderOverlay(formatted);
       clearTimeout(inputTimeout);
-      inputTimeout = setTimeout(() => {
-        historyMgr.save(editor.value, editor.selectionStart);
-      }, 300);
+      inputTimeout = setTimeout(() => historyMgr.save(editor.value, editor.selectionStart), 300);
+    }
+  });
+
+  function manageToolbarVisibility() {
+    const state = getCurrentNodeAndOffset();
+    if (document.activeElement !== editor || state.lineOffset < state.rawParsed.contentStart) {
+      if(window.innerWidth < 768) toolbar.classList.remove('visible');
+      editor.blur(); 
+    } else {
+      toolbar.classList.add('visible');
     }
   }
-
-  editor.addEventListener('input', reflow);
-
-  let lastActiveNodeIdx = -1;
 
   document.addEventListener('selectionchange', () => {
     if (document.activeElement !== editor) return;
     const state = getCurrentNodeAndOffset();
-    
     let nodes = parseDocument(editor.value);
-    let needsApply = false;
-    let targetOffset = state.contentOffset;
-    let targetNodeIdx = state.nodeIndex;
+    let needsApply = false, targetOffset = state.contentOffset, targetNodeIdx = state.nodeIndex;
 
-    // 1. Finalize previous node if we moved away from it
+    manageToolbarVisibility();
+
     if (state.nodeIndex !== lastActiveNodeIdx && lastActiveNodeIdx !== -1) {
-      if (nodes[lastActiveNodeIdx] && nodes[lastActiveNodeIdx].content !== '?') {
-        finalizeNode(nodes, lastActiveNodeIdx);
-        needsApply = true;
+      if (nodes[lastActiveNodeIdx] && nodes[lastActiveNodeIdx].content !== '?') { finalizeNode(nodes, lastActiveNodeIdx); needsApply = true; }
+    }
+
+    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content === '?') {
+      if (state.nodeIndex === 0) {
+        nodes.splice(1, 0, { depth: 1, content: '' });
+        targetNodeIdx = 1; targetOffset = 0; needsApply = true;
+      } else {
+        nodes[state.nodeIndex].content = '';
+        nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth, content: '?' });
+        targetNodeIdx = state.nodeIndex; targetOffset = 0; needsApply = true;
       }
     }
 
-    // 2. Check for Inspire placeholder interaction
-    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content === '?') {
-      nodes[state.nodeIndex].content = '';
-      nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth, content: '?' });
-      needsApply = true;
-      targetOffset = 0; 
-      targetNodeIdx = state.nodeIndex;
-    }
+    const prevActiveNodeIdx = lastActiveNodeIdx;
+    lastActiveNodeIdx = targetNodeIdx; // Set BEFORE renderOverlay to fix highlight delay
 
     if (needsApply) {
       const formatted = formatTreeFromNodes(nodes);
-      if (formatted.text !== editor.value) {
-        applyFormatted(formatted);
-        restoreCursorForNode(formatted, targetNodeIdx, targetOffset);
-        historyMgr.save(editor.value, editor.selectionStart);
-      } else {
-        renderOverlay(formatted);
-      }
+      applyFormatted(formatted);
+      restoreCursorForNode(formatted, targetNodeIdx, targetOffset);
+      historyMgr.save(editor.value, editor.selectionStart);
+    } else if (prevActiveNodeIdx !== targetNodeIdx) {
+      renderOverlay(formatTreeFromNodes(nodes)); 
     }
-    
-    lastActiveNodeIdx = targetNodeIdx;
   });
 
   editor.addEventListener('blur', () => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content !== '?') {
-      finalizeNode(nodes, state.nodeIndex);
-    }
-    applyFormatted(formatTreeFromNodes(nodes));
+    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
+    if (nodes[state.nodeIndex] && nodes[state.nodeIndex].content !== '?') finalizeNode(nodes, state.nodeIndex);
     lastActiveNodeIdx = -1;
+    applyFormatted(formatTreeFromNodes(nodes));
     historyMgr.save(editor.value, editor.selectionStart);
   });
-
-  // ---------- keyboard structural edits ----------
 
   editor.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
-      e.preventDefault();
-      document.getElementById('undoBtn').click();
-      return;
-    }
-    if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) {
-      e.preventDefault();
-      document.getElementById('redoBtn').click();
-      return;
-    }
-
-    const val = editor.value;
+    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); historyMgr.undo(editor, () => renderOverlay(formatTree(editor.value))); return; }
+    if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) { e.preventDefault(); historyMgr.redo(editor, () => renderOverlay(formatTree(editor.value))); return; }
+    
     if (editor.selectionStart !== editor.selectionEnd) return;
-
-    const state = getCurrentNodeAndOffset();
-    const nodes = parseDocument(val);
-    const node = nodes[state.nodeIndex];
+    const state = getCurrentNodeAndOffset(), nodes = parseDocument(editor.value), node = nodes[state.nodeIndex];
     if (!node) return;
-
-    let structuredEditOccurred = false;
+    let modified = false;
 
     if (e.key === ' ' && node.content === '-' && state.contentOffset === 1) {
-      e.preventDefault();
-      node.content = '';
-      const newNode = { depth: node.depth, content: '' };
-      nodes.splice(state.nodeIndex + 1, 0, newNode);
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex + 1, 0);
-      lastActiveNodeIdx = state.nodeIndex + 1;
-      structuredEditOccurred = true;
+      e.preventDefault(); node.content = '';
+      nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
+      lastActiveNodeIdx = state.nodeIndex + 1; modified = true;
+    } else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) {
+      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
+      const end = getSubtreeEnd(nodes, state.nodeIndex);
+      for(let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); modified = true;
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
+      nodes.splice(state.nodeIndex + 1, 0, { depth: node.depth, content: '' });
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
+      lastActiveNodeIdx = state.nodeIndex + 1; modified = true;
+    } else if (e.key === 'Tab') {
+      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
+      const end = getSubtreeEnd(nodes, state.nodeIndex);
+      if (e.shiftKey && node.depth > 0) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--; } 
+      else if (!e.shiftKey) { for(let i=state.nodeIndex; i<end; i++) nodes[i].depth++; }
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); modified = true;
+    } else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) {
+      e.preventDefault(); finalizeNode(nodes, state.nodeIndex);
+      const end = getSubtreeEnd(nodes, state.nodeIndex);
+      for(let i=state.nodeIndex; i<end; i++) nodes[i].depth--;
+      const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0); modified = true;
     }
-    else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) {
-      e.preventDefault();
-      finalizeNode(nodes, state.nodeIndex);
-      node.depth += 1;
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex, 0);
-      structuredEditOccurred = true;
-    }
-    else if (e.key === 'Enter') {
-      e.preventDefault();
-      finalizeNode(nodes, state.nodeIndex);
-      const newNode = { depth: node.depth, content: '' };
-      nodes.splice(state.nodeIndex + 1, 0, newNode);
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex + 1, 0);
-      lastActiveNodeIdx = state.nodeIndex + 1;
-      structuredEditOccurred = true;
-    }
-    else if (e.key === 'Tab') {
-      e.preventDefault();
-      finalizeNode(nodes, state.nodeIndex);
-      if (e.shiftKey) {
-        if (node.depth > 0) node.depth -= 1;
-      } else {
-        node.depth += 1;
-      }
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex, state.contentOffset);
-      structuredEditOccurred = true;
-    }
-    else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) {
-      e.preventDefault();
-      finalizeNode(nodes, state.nodeIndex);
-      node.depth -= 1;
-      const formatted = formatTreeFromNodes(nodes);
-      applyFormatted(formatted);
-      restoreCursorForNode(formatted, state.nodeIndex, 0);
-      structuredEditOccurred = true;
-    }
-
-    if (structuredEditOccurred) {
-      historyMgr.save(editor.value, editor.selectionStart);
-    }
+    if (modified) historyMgr.save(editor.value, editor.selectionStart);
   });
 
-  // ---------- subtree helpers & toolbar actions ----------
+  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(editor.value, editor.selectionStart); };
 
-  function getSubtreeEnd(nodes, idx) {
-    const depth = nodes[idx].depth;
-    let j = idx + 1;
-    while (j < nodes.length && nodes[j].depth > depth) j++;
-    return j;
-  }
-
-  function getPrevSiblingStart(nodes, idx) {
-    const depth = nodes[idx].depth;
-    let j = idx - 1;
-    while (j >= 0 && nodes[j].depth > depth) j--;
-    return (j >= 0 && nodes[j].depth === depth) ? j : -1;
-  }
-
-  function wrapAction(actionFn) {
-    return () => {
-      actionFn();
-      historyMgr.save(editor.value, editor.selectionStart);
-    }
-  }
-
-  function actionInspire() {
+  document.getElementById('inspireBtn').onclick = wrapAction(() => {
     inspireActive = !inspireActive;
-    const btn = document.getElementById('inspireBtn');
+    document.getElementById('inspireBtn').classList.toggle('active', inspireActive);
+    let nodes = parseDocument(editor.value);
     if (inspireActive) {
-      btn.classList.add('active');
-      addPlaceholders();
+      const newNodes = [nodes[0] || { depth: 0, content: '?' }];
+      for (let i = 1; i < nodes.length; i++) {
+        if(nodes[i].content === '?') continue;
+        newNodes.push(nodes[i]);
+        let nextDepth = i + 1 < nodes.length ? nodes[i+1].depth : 0;
+        for (let d = nodes[i].depth; d > nextDepth; d--) newNodes.push({ depth: d, content: '?' });
+      }
+      nodes = newNodes;
     } else {
-      btn.classList.remove('active');
-      removePlaceholders();
+      nodes = nodes.filter((n, i) => i === 0 || n.content.trim() !== '?');
     }
-    editor.focus();
-  }
-
-  function addPlaceholders() {
-    const nodes = parseDocument(editor.value);
-    const newNodes = [];
-    
-    if (nodes.length === 0 || nodes[0].content !== '?') {
-      newNodes.push({ depth: 0, content: '?' });
-    }
-
-    for (let i = 0; i < nodes.length; i++) {
-      if (nodes[i].content === '?' && i === 0 && newNodes.length > 0 && newNodes[0].content === '?') {
-        continue; 
-      }
-      
-      newNodes.push(nodes[i]);
-      
-      let currentDepth = nodes[i].depth;
-      let nextDepth = (i + 1 < nodes.length) ? nodes[i+1].depth : 0;
-      
-      if (nextDepth < currentDepth) {
-        for (let d = currentDepth; d > nextDepth; d--) {
-          if (newNodes[newNodes.length - 1].content === '?' && newNodes[newNodes.length - 1].depth === d) {
-            continue;
-          }
-          newNodes.push({ depth: d, content: '?' });
-        }
-      }
-    }
-    
-    if (newNodes.length > 0) {
-      const last = newNodes[newNodes.length - 1];
-      if (last.content !== '?' || last.depth !== 0) {
-        newNodes.push({ depth: 0, content: '?' });
-      }
-    }
-
-    const formatted = formatTreeFromNodes(newNodes);
-    applyFormatted(formatted);
-    historyMgr.save(editor.value, editor.selectionStart);
-  }
-
-  function removePlaceholders() {
-    const nodes = parseDocument(editor.value);
-    const newNodes = nodes.filter(n => n.content.trim() !== '?');
-    if (newNodes.length === 0) newNodes.push({ depth: 0, content: '' });
-    
-    const formatted = formatTreeFromNodes(newNodes);
-    applyFormatted(formatted);
-    historyMgr.save(editor.value, editor.selectionStart);
-  }
-
-  const actionNewParent = wrapAction(() => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    const idx = state.nodeIndex;
-    const node = nodes[idx];
-    if (!node) return;
-    finalizeNode(nodes, idx);
-
-    const origDepth = node.depth;
-    const end = getSubtreeEnd(nodes, idx); 
-    for (let i = idx; i < end; i++) nodes[i].depth += 1;
-    nodes.splice(idx, 0, { depth: origDepth, content: '' });
-
-    const formatted = formatTreeFromNodes(nodes);
-    applyFormatted(formatted);
-    restoreCursorForNode(formatted, idx, 0);
-    lastActiveNodeIdx = idx;
-    editor.focus();
+    applyFormatted(formatTreeFromNodes(nodes)); editor.focus();
   });
 
-  const actionDeleteNode = wrapAction(() => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    const idx = state.nodeIndex;
-    if (!nodes[idx]) return;
-
-    if (nodes.length <= 1) {
-      nodes[0].content = '';
-    } else if (nodes[idx].depth === 0) {
-      const end = getSubtreeEnd(nodes, idx);
-      nodes.splice(idx + 1, end - (idx + 1));
-      nodes[idx].content = '';
-    } else {
-      const end = getSubtreeEnd(nodes, idx);
-      nodes.splice(idx, end - idx);
-    }
-
-    const formatted = formatTreeFromNodes(nodes);
-    applyFormatted(formatted);
-    const newIdx = Math.min(idx, nodes.length - 1);
-    restoreCursorForNode(formatted, newIdx, 0);
-    lastActiveNodeIdx = newIdx;
-    editor.focus();
+  document.getElementById('newParentBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
+    if (!nodes[state.nodeIndex]) return;
+    const end = getSubtreeEnd(nodes, state.nodeIndex);
+    for (let i = state.nodeIndex; i < end; i++) nodes[i].depth++;
+    nodes.splice(state.nodeIndex, 0, { depth: nodes[state.nodeIndex].depth - 1, content: '' });
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, 0);
+    lastActiveNodeIdx = state.nodeIndex; editor.focus();
   });
 
-  const actionDeletePromote = wrapAction(() => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    const idx = state.nodeIndex;
-    const node = nodes[idx];
-    if (!node || node.depth === 0) return; 
-
-    const end = getSubtreeEnd(nodes, idx);
-    for (let i = idx + 1; i < end; i++) nodes[i].depth -= 1;
-    nodes.splice(idx, 1);
-
-    const formatted = formatTreeFromNodes(nodes);
-    applyFormatted(formatted);
-    const newIdx = Math.min(idx, nodes.length - 1);
-    restoreCursorForNode(formatted, newIdx, 0);
-    lastActiveNodeIdx = newIdx;
-    editor.focus();
+  document.getElementById('newChildBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset();
+    if (!nodes[state.nodeIndex]) return;
+    nodes.splice(state.nodeIndex + 1, 0, { depth: nodes[state.nodeIndex].depth + 1, content: '' });
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex + 1, 0);
+    lastActiveNodeIdx = state.nodeIndex + 1; editor.focus();
   });
-
-  const actionMoveUp = wrapAction(() => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    const idx = state.nodeIndex;
-    const end = getSubtreeEnd(nodes, idx);
-    const prevStart = getPrevSiblingStart(nodes, idx);
-    if (prevStart === -1) return;
-
-    const block = nodes.splice(idx, end - idx);
-    nodes.splice(prevStart, 0, ...block);
-
-    const formatted = formatTreeFromNodes(nodes);
-    applyFormatted(formatted);
-    restoreCursorForNode(formatted, prevStart, state.contentOffset);
-    lastActiveNodeIdx = prevStart;
-    editor.focus();
-  });
-
-  const actionMoveDown = wrapAction(() => {
-    const nodes = parseDocument(editor.value);
-    const state = getCurrentNodeAndOffset();
-    const idx = state.nodeIndex;
-    const end = getSubtreeEnd(nodes, idx);
-    if (end >= nodes.length || nodes[end].depth !== nodes[idx].depth) return;
-
-    const nextEnd = getSubtreeEnd(nodes, end);
-    const block = nodes.splice(idx, end - idx);
-    const insertPos = idx + (nextEnd - end);
-    nodes.splice(insertPos, 0, ...block);
-
-    const formatted = formatTreeFromNodes(nodes);
-    applyFormatted(formatted);
-    restoreCursorForNode(formatted, insertPos, state.contentOffset);
-    lastActiveNodeIdx = insertPos;
-    editor.focus();
-  });
-
-  [
-    ['undoBtn', () => { historyMgr.undo(editor, () => renderOverlay(formatTree(editor.value))); editor.focus(); }],
-    ['redoBtn', () => { historyMgr.redo(editor, () => renderOverlay(formatTree(editor.value))); editor.focus(); }],
-    ['inspireBtn', actionInspire],
-    ['newParentBtn', actionNewParent],
-    ['deleteNodeBtn', actionDeleteNode],
-    ['deletePromoteBtn', actionDeletePromote],
-    ['moveUpBtn', actionMoveUp],
-    ['moveDownBtn', actionMoveDown]
-  ].forEach(([id, fn]) => {
-    const btn = document.getElementById(id);
-    btn.addEventListener('mousedown', (e) => e.preventDefault()); // Keeps editor focus
-    btn.addEventListener('click', fn);
-  });
-
-  // ---------- initial content ----------
-
-  const INITIAL_NODES = [
-    { depth: 0, content: 'Project Architecture Plan' },
-    { depth: 1, content: 'System Requirements' },
-    { depth: 2, content: 'Editor must support seamless wrapping and clean redraw' },
-    { depth: 2, content: 'Assumption: All client browsers support standard monospace fonts' },
-    { depth: 1, content: 'Implementation Steps' },
-    { depth: 2, content: 'Character-grid connector drawing and indent depth tracking' },
-    { depth: 2, content: 'Automatic content word wrapping aligned with each node bubble' }
-  ];
-
-  // Render initial frame to prevent flash, then re-render strictly aligned once fonts load
-  applyFormatted(formatTreeFromNodes(INITIAL_NODES));
   
-  if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => {
-      fontMetrics = null; // Forces recalculation with the loaded Roboto font
-      applyFormatted(formatTreeFromNodes(INITIAL_NODES));
-      historyMgr.save(editor.value, 0);
+  document.getElementById('foldBtn').onclick = wrapAction(() => {
+    const state = getCurrentNodeAndOffset();
+    if(foldedNodes.has(state.nodeIndex)) foldedNodes.delete(state.nodeIndex);
+    else foldedNodes.add(state.nodeIndex);
+    const fmt = formatTree(editor.value); applyFormatted(fmt); restoreCursorForNode(fmt, state.nodeIndex, state.contentOffset); editor.focus();
+  });
+
+  document.getElementById('deleteNodeBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), state = getCurrentNodeAndOffset(), idx = state.nodeIndex;
+    if (nodes.length <= 1) nodes[0].content = '?';
+    else { const end = getSubtreeEnd(nodes, idx); nodes.splice(idx, end - idx); if(!nodes.length) nodes.push({depth:0, content:'?'}); }
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, Math.min(idx, nodes.length - 1), 0); editor.focus();
+  });
+
+  document.getElementById('deletePromoteBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex;
+    if (!nodes[idx] || nodes[idx].depth === 0) return;
+    const end = getSubtreeEnd(nodes, idx); for (let i = idx + 1; i < end; i++) nodes[i].depth--;
+    nodes.splice(idx, 1);
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, Math.min(idx, nodes.length - 1), 0); editor.focus();
+  });
+
+  document.getElementById('moveUpBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex, end = getSubtreeEnd(nodes, idx);
+    let prevStart = idx - 1; while (prevStart >= 0 && nodes[prevStart].depth > nodes[idx].depth) prevStart--;
+    if (prevStart < 0 || nodes[prevStart].depth !== nodes[idx].depth) return;
+    nodes.splice(prevStart, 0, ...nodes.splice(idx, end - idx));
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, prevStart, 0); editor.focus();
+  });
+
+  document.getElementById('moveDownBtn').onclick = wrapAction(() => {
+    const nodes = parseDocument(editor.value), idx = getCurrentNodeAndOffset().nodeIndex, end = getSubtreeEnd(nodes, idx);
+    if (end >= nodes.length || nodes[end].depth !== nodes[idx].depth) return;
+    const nextEnd = getSubtreeEnd(nodes, end);
+    nodes.splice(idx + (nextEnd - end), 0, ...nodes.splice(idx, end - idx));
+    const fmt = formatTreeFromNodes(nodes); applyFormatted(fmt); restoreCursorForNode(fmt, idx + (nextEnd - end), 0); editor.focus();
+  });
+
+  // Save/Load logic
+  document.getElementById('openBtn').onclick = () => {
+    const select = document.getElementById('savedList');
+    select.innerHTML = '';
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('tree_doc_'));
+    keys.forEach(k => { const opt = document.createElement('option'); opt.value = k; opt.textContent = k.replace('tree_doc_', ''); select.appendChild(opt); });
+    document.getElementById('saveModal').style.display = 'flex';
+  };
+  document.getElementById('closeModalBtn').onclick = () => document.getElementById('saveModal').style.display = 'none';
+  document.getElementById('saveDocBtn').onclick = () => {
+    const name = prompt('Name your document:');
+    if(name) { localStorage.setItem('tree_doc_' + name, editor.value); document.getElementById('closeModalBtn').click(); }
+  };
+  document.getElementById('loadDocBtn').onclick = () => {
+    const val = document.getElementById('savedList').value;
+    if(val) { editor.value = localStorage.getItem(val); foldedNodes.clear(); applyFormatted(formatTree(editor.value)); document.getElementById('closeModalBtn').click(); }
+  };
+  document.getElementById('deleteDocBtn').onclick = () => {
+    const val = document.getElementById('savedList').value;
+    if(val) { localStorage.removeItem(val); document.getElementById('openBtn').click(); }
+  };
+  document.getElementById('importExportBtn').onclick = () => {
+    const text = editor.value;
+    navigator.clipboard.writeText(text).then(() => {
+        const paste = prompt("Exported to clipboard! Paste here to Import, or click Cancel:");
+        if (paste) { editor.value = paste; foldedNodes.clear(); applyFormatted(formatTree(editor.value)); }
     });
-  } else {
-    // Fallback if document.fonts.ready isn't natively supported on ancient browsers
-    setTimeout(() => {
-      fontMetrics = null; 
-      applyFormatted(formatTreeFromNodes(INITIAL_NODES));
-      historyMgr.save(editor.value, 0);
-    }, 200);
-  }
+  };
+
+  const INITIAL_NODES = [{ depth: 0, content: '?' }];
+  applyFormatted(formatTreeFromNodes(INITIAL_NODES));
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(() => { fontMetrics = null; applyFormatted(formatTreeFromNodes(INITIAL_NODES)); historyMgr.save(editor.value, 0); }); } 
+  else setTimeout(() => { fontMetrics = null; applyFormatted(formatTreeFromNodes(INITIAL_NODES)); historyMgr.save(editor.value, 0); }, 200);
 
 </script>
 
