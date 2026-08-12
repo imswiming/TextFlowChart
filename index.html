@@ -25,7 +25,7 @@
     background: #1e293b;
     display: flex;
     flex-direction: column;
-    position: relative;
+    position: relative; /* Anchors the floating mobile toolbar */
   }
 
   .toolbar {
@@ -82,7 +82,7 @@
     -webkit-font-feature-settings: "liga" 0, "calt" 0;
     font-feature-settings: "liga" 0, "calt" 0;
     tab-size: 8;
-    padding: var(--editor-padding-top, 18px) 16px 18px 16px;
+    padding: 18px 16px;
     border-radius: 0;
     white-space: pre;
     box-sizing: border-box;
@@ -207,8 +207,8 @@
       overflow-y: auto;
     }
     .toolbar.visible { display: flex; }
-
-    /* ADD THIS BLOCK: Adjust padding-top to safely clear the wrapped buttons */
+    
+    /* Ensure text safely clears the wrapped buttons initially but scrolls behind them */
     .editor, .editor-overlay {
       padding-top: 220px; 
     }
@@ -259,8 +259,17 @@
   const overlayContent = document.getElementById('overlay-content');
   const toolbar = document.getElementById('toolbar');
 
+  // PREVENT TOOLBAR BUTTONS FROM STEALING FOCUS ON MOBILE
+  const preventFocusLoss = (e) => {
+    if (e.target.closest('button')) {
+      e.preventDefault();
+    }
+  };
+  toolbar.addEventListener('mousedown', preventFocusLoss);
+  toolbar.addEventListener('touchstart', preventFocusLoss, { passive: false });
+
   const MAX_CONTENT_LENGTH = 50;   
-  const INDENT_WIDTH = 12; 
+  const INDENT_WIDTH = 24; // Increased from 12 to double the indent length
   const NODE_MARK = '\u200B';      
 
   let inspireActive = false;
@@ -482,17 +491,6 @@
     return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) };
   }
 
-  function updateMobileToolbarPadding() {
-    if (window.innerWidth <= 768 && toolbar.classList.contains('visible')) {
-      const toolbarHeight = toolbar.offsetHeight;
-      const topPadding = toolbarHeight + 20; 
-      document.documentElement.style.setProperty('--editor-padding-top', topPadding + 'px');
-    } else {
-      document.documentElement.style.setProperty('--editor-padding-top', '18px');
-    }
-    fontMetrics = null; 
-  }
-
   function computeNodeBoxes(formatted) {
     const lines = formatted.text.split('\n');
     const { lineToNodeMap, visibleNodes } = formatted;
@@ -588,9 +586,12 @@
     formatted.rowGuides.forEach((segs, row) => {
       const yTop = paddingTop + row * lineHeight, yMid = yTop + lineHeight / 2, yBottom = yTop + lineHeight;
       segs.forEach(seg => {
-        const colStartX = paddingLeft + measureText(' '.repeat((seg.col - 1) * INDENT_WIDTH));
-        const trunkX = colStartX + measureText(' '.repeat(3)); 
-        const armEndX = paddingLeft + measureText(' '.repeat(seg.col * INDENT_WIDTH)) - 14; 
+        // Updated logic: Offset the trunk line to maintain a short horizontal elbow despite doubled indent.
+        const textIndentSpaces = seg.col * INDENT_WIDTH;
+        const trunkSpaces = textIndentSpaces - 9; // Keeps the horizontal line exactly 9 spaces long
+
+        const trunkX = paddingLeft + measureText(' '.repeat(trunkSpaces)); 
+        const armEndX = paddingLeft + measureText(' '.repeat(textIndentSpaces)) - 14; 
         
         if (seg.kind === 'through') mkLine(trunkX, yTop, trunkX, yBottom);
         else if (seg.kind === 'elbow-tee') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); mkLine(trunkX, yMid, trunkX, yBottom); }
@@ -623,11 +624,7 @@
     }, 200);
   });
 
-  window.addEventListener('resize', () => { 
-    updateMobileToolbarPadding();
-    fontMetrics = null; 
-    renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
-  });
+  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); });
 
   function updateFontSize(newSize) {
     const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
@@ -778,14 +775,16 @@
 
   function manageToolbarVisibility() {
     const state = getCurrentState();
-    if (document.activeElement !== editor || state.lineOffset < state.rawParsed.contentStart) {
+    if (document.activeElement !== editor) {
       if(window.innerWidth < 768) toolbar.classList.remove('visible');
-      editor.blur(); 
     } else {
       toolbar.classList.add('visible');
+      // Bugfix: Prevents cursor from sitting in the left indentation margin by pushing it to text start
+      if (state.lineOffset < state.rawParsed.contentStart) {
+        const newPos = editor.selectionStart + (state.rawParsed.contentStart - state.lineOffset);
+        editor.setSelectionRange(newPos, newPos);
+      }
     }
-    updateMobileToolbarPadding();
-    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
   }
 
   document.addEventListener('selectionchange', () => {
@@ -829,8 +828,6 @@
     const state = getCurrentState();
     if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex);
     lastActiveMasterIdx = -1;
-    if (window.innerWidth < 768) toolbar.classList.remove('visible');
-    updateMobileToolbarPadding();
     renderAndSave();
   });
 
