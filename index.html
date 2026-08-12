@@ -813,9 +813,11 @@
   function manageToolbarVisibility() {
     const state = getCurrentState();
     const isMarginClick = state.lineOffset < state.rawParsed.contentStart;
-    // A leftmost/margin caret on a non-root line remains on that line.
-    // It should not be redirected to the root.
-    if (document.activeElement !== editor || (isMarginClick && state.masterIndex === 0)) {
+    // A margin/leftmost click on any line other than the root's own line is redirected to the
+    // root placeholder (see selectionchange below) rather than dismissed - so don't blur/hide
+    // the toolbar for that case, or the redirect would just close the keyboard on the user.
+    const isRootRedirect = isMarginClick && state.masterIndex !== 0;
+    if (document.activeElement !== editor || (isMarginClick && !isRootRedirect)) {
       if(window.innerWidth < 768) toolbar.classList.remove('visible');
       editor.blur(); 
     } else {
@@ -836,12 +838,16 @@
 
     manageToolbarVisibility();
 
-    // A leftmost/margin caret on a non-root line does nothing special.
-    // In particular, it must not redirect to the root or trigger root creation.
+    // Placing the caret at the leftmost/margin of any line except the root placeholder's own
+    // line acts as a shortcut for pressing the root placeholder: redirect straight to the root
+    // node's content. (Margin clicks on the root's own line fall through unchanged - no redirect
+    // needed since you're already there.)
     if (!atContent && state.masterIndex !== 0) {
-      effectiveMasterIdx = state.masterIndex;
-      targetMasterIdx = state.masterIndex;
-      targetOffset = state.contentOffset;
+      effectiveMasterIdx = 0;
+      targetMasterIdx = 0;
+      targetOffset = 0;
+      needsApply = true;
+      atContent = true;
     }
 
     if (effectiveMasterIdx !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
@@ -851,13 +857,10 @@
       }
     }
 
-    // Only treat this as "the user is about to type into the placeholder node"
-    // when the caret is actually at/after the node's content start.
-    if (
-      atContent &&
-      masterNodes[effectiveMasterIdx] &&
-      masterNodes[effectiveMasterIdx].content === '?'
-    ) {
+    // Only treat this as "the user is about to type into the placeholder node" when the caret is
+    // actually at/after the node's content start (including via the root-redirect above) -
+    // otherwise a plain margin click on the root's own line would spawn a phantom child.
+    if (atContent && masterNodes[effectiveMasterIdx] && masterNodes[effectiveMasterIdx].content === '?') {
       if (effectiveMasterIdx === 0) {
         for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++;
         masterNodes.unshift({ depth: 0, content: '?', folded: false });
