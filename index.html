@@ -25,7 +25,7 @@
     background: #1e293b;
     display: flex;
     flex-direction: column;
-    position: relative; /* Anchors the floating mobile toolbar */
+    position: relative;
   }
 
   .toolbar {
@@ -82,7 +82,7 @@
     -webkit-font-feature-settings: "liga" 0, "calt" 0;
     font-feature-settings: "liga" 0, "calt" 0;
     tab-size: 8;
-    padding: 18px 16px;
+    padding: var(--editor-padding-top, 18px) 16px 18px 16px;
     border-radius: 0;
     white-space: pre;
     box-sizing: border-box;
@@ -207,11 +207,14 @@
       overflow-y: auto;
     }
     .toolbar.visible { display: flex; }
-    
-    /* Ensure text safely clears the wrapped buttons initially but scrolls behind them */
-    .editor, .editor-overlay {
-      padding-top: 220px; 
-    }
+
+    /* Padding-top is calculated in JS (updateMobileToolbarPadding) from the
+       toolbar's actual rendered height and applied via the
+       --editor-padding-top CSS variable on the base .editor/.editor-overlay
+       rule above. We intentionally do NOT hardcode a padding-top here -
+       a fixed value doesn't track the toolbar's real height (which changes
+       with wrapping/screen width), which is what let the buttons overlap
+       the text. */
   }
 </style>
 </head>
@@ -259,18 +262,21 @@
   const overlayContent = document.getElementById('overlay-content');
   const toolbar = document.getElementById('toolbar');
 
-  // PREVENT TOOLBAR BUTTONS FROM STEALING FOCUS ON MOBILE
-  const preventFocusLoss = (e) => {
-    if (e.target.closest('button')) {
-      e.preventDefault();
-    }
-  };
-  toolbar.addEventListener('mousedown', preventFocusLoss);
-  toolbar.addEventListener('touchstart', preventFocusLoss, { passive: false });
-
-  const MAX_CONTENT_LENGTH = 50;   
-  const INDENT_WIDTH = 24; // Increased from 12 to double the indent length
+  const MAX_CONTENT_LENGTH = 50;
+  const INDENT_WIDTH = 24;         // Indent distance per depth level (doubled from the original 12)
+  const GUIDE_LINE_INDENT = 12;    // Original indent width, kept fixed so the drawn hierarchy
+                                    // connector lines stay the same visual length even though the
+                                    // indent distance itself doubled (see renderOverlay below)
   const NODE_MARK = '\u200B';      
+
+  // FIX: buttons in the toolbar were stealing focus from the editor on tap, which triggered a
+  // blur (closing the keyboard and hiding the floating mobile toolbar) before the click event
+  // ever reached the button - so buttons appeared to "do nothing but close the menu". Blocking
+  // the default mousedown/touchstart behavior keeps the editor focused while a toolbar button
+  // is being tapped, so the click goes through normally afterwards.
+  const preventToolbarFocusSteal = (e) => { e.preventDefault(); };
+  toolbar.addEventListener('mousedown', preventToolbarFocusSteal);
+  toolbar.addEventListener('touchstart', preventToolbarFocusSteal, { passive: false });
 
   let inspireActive = false;
   let masterNodes = [];
@@ -491,6 +497,17 @@
     return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) };
   }
 
+  function updateMobileToolbarPadding() {
+    if (window.innerWidth <= 768 && toolbar.classList.contains('visible')) {
+      const toolbarHeight = toolbar.offsetHeight;
+      const topPadding = toolbarHeight + 20; 
+      document.documentElement.style.setProperty('--editor-padding-top', topPadding + 'px');
+    } else {
+      document.documentElement.style.setProperty('--editor-padding-top', '18px');
+    }
+    fontMetrics = null; 
+  }
+
   function computeNodeBoxes(formatted) {
     const lines = formatted.text.split('\n');
     const { lineToNodeMap, visibleNodes } = formatted;
@@ -522,11 +539,17 @@
       let textOverlayContent = '';
       for(let k=i; k<j; k++) textOverlayContent += (k>i?'\n':'') + parseLine(lines[k]).content;
 
+      // Placeholder nodes ('?') get the same box size as a genuinely empty node, with the '?'
+      // centered in the middle of that box, instead of being sized to the narrow '?' glyph.
+      const isPlaceholder = node.content === '?';
+      if (isPlaceholder) maxPxWidth = measureText(' '.repeat(18));
+
       boxes.push({ 
         visIndex, masterIndex, lineStart: i, lineCount: j - i, 
         prefixPxWidth: measureText(' '.repeat(startCol)), 
         maxPxWidth, isAssumption: node.content.startsWith('Assumption:'),
         isFolded: node.folded,
+        isPlaceholder,
         textOverlayContent
       });
       i = j;
@@ -553,7 +576,15 @@
       
       const txt = document.createElement('div');
       txt.style.position = 'absolute';
-      txt.style.left = '12px'; txt.style.top = '4px';
+      if (b.isPlaceholder) {
+        txt.style.left = '0'; txt.style.top = '0';
+        txt.style.width = '100%'; txt.style.height = '100%';
+        txt.style.display = 'flex';
+        txt.style.alignItems = 'center';
+        txt.style.justifyContent = 'center';
+      } else {
+        txt.style.left = '12px'; txt.style.top = '4px';
+      }
       txt.textContent = b.textOverlayContent;
       div.appendChild(txt);
 
@@ -583,15 +614,17 @@
       svg.appendChild(l);
     };
 
+    // The connector line's pixel length is derived from the ORIGINAL (pre-doubling) indent
+    // width, so it stays visually the same length. Only its position (armEndX, tied to the
+    // new, doubled INDENT_WIDTH) moves further right as depth increases - i.e. the indent
+    // distance itself doubles, but the drawn hierarchy line does not stretch.
+    const guideLinePxLength = measureText(' '.repeat(Math.max(0, GUIDE_LINE_INDENT - 3))) - 14;
+
     formatted.rowGuides.forEach((segs, row) => {
       const yTop = paddingTop + row * lineHeight, yMid = yTop + lineHeight / 2, yBottom = yTop + lineHeight;
       segs.forEach(seg => {
-        // Updated logic: Offset the trunk line to maintain a short horizontal elbow despite doubled indent.
-        const textIndentSpaces = seg.col * INDENT_WIDTH;
-        const trunkSpaces = textIndentSpaces - 9; // Keeps the horizontal line exactly 9 spaces long
-
-        const trunkX = paddingLeft + measureText(' '.repeat(trunkSpaces)); 
-        const armEndX = paddingLeft + measureText(' '.repeat(textIndentSpaces)) - 14; 
+        const armEndX = paddingLeft + measureText(' '.repeat(seg.col * INDENT_WIDTH)) - 14; 
+        const trunkX = armEndX - guideLinePxLength; 
         
         if (seg.kind === 'through') mkLine(trunkX, yTop, trunkX, yBottom);
         else if (seg.kind === 'elbow-tee') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); mkLine(trunkX, yMid, trunkX, yBottom); }
@@ -624,7 +657,11 @@
     }, 200);
   });
 
-  window.addEventListener('resize', () => { fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); });
+  window.addEventListener('resize', () => { 
+    updateMobileToolbarPadding();
+    fontMetrics = null; 
+    renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
+  });
 
   function updateFontSize(newSize) {
     const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
@@ -775,42 +812,161 @@
 
   function manageToolbarVisibility() {
     const state = getCurrentState();
-    if (document.activeElement !== editor) {
+    const isMarginClick = state.lineOffset < state.rawParsed.contentStart;
+    // A leftmost/margin caret on a non-root line remains on that line.
+    // It should not be redirected to the root.
+    if (document.activeElement !== editor || (isMarginClick && state.masterIndex === 0)) {
       if(window.innerWidth < 768) toolbar.classList.remove('visible');
+      editor.blur(); 
     } else {
       toolbar.classList.add('visible');
-      // Bugfix: Prevents cursor from sitting in the left indentation margin by pushing it to text start
-      if (state.lineOffset < state.rawParsed.contentStart) {
-        const newPos = editor.selectionStart + (state.rawParsed.contentStart - state.lineOffset);
-        editor.setSelectionRange(newPos, newPos);
-      }
     }
+    updateMobileToolbarPadding();
+    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
   }
+
+  // Handle mouse placement ourselves.  Native textarea hit-testing can move the
+  // caret to a different visual line when the click is in the indentation or
+  // outside the node text.  That is what caused non-root clicks to jump to root.
+  let pointerDownOnEditor = false;
+  let gutterPointerDown = false;
+  let suppressPointerPlaceholder = false;
+
+  function getMouseLineIndex(e) {
+    if (!fontMetrics) fontMetrics = computeFontMetrics();
+    const rect = editor.getBoundingClientRect();
+    const y = e.clientY - rect.top + editor.scrollTop;
+    const raw = Math.floor((y - fontMetrics.paddingTop) / fontMetrics.lineHeight);
+    const formatted = formatTreeFromNodes(getVisibleNodes());
+    return Math.max(0, Math.min(formatted.lineToNodeMap.length - 1, raw));
+  }
+
+  function getLineStartPosition(lines, lineIdx) {
+    let pos = 0;
+    for (let i = 0; i < lineIdx; i++) pos += lines[i].length + 1;
+    return pos;
+  }
+
+  editor.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+
+    pointerDownOnEditor = true;
+    gutterPointerDown = false;
+    suppressPointerPlaceholder = false;
+
+    const formatted = formatTreeFromNodes(getVisibleNodes());
+    const lines = formatted.text.split('\n');
+    const lineIdx = getMouseLineIndex(e);
+    const mapInfo = formatted.lineToNodeMap[lineIdx];
+
+    // Spacer rows do not represent a node.  Do not let the browser's native
+    // textarea hit-testing turn a spacer click into a click on the root.
+    if (!mapInfo) {
+      e.preventDefault();
+      const prev = lineIdx > 0 ? formatted.lineToNodeMap[lineIdx - 1] : null;
+      if (prev) {
+        const pLine = lines[lineIdx - 1] || '';
+        const p = parseLine(pLine);
+        const pos = getLineStartPosition(lines, lineIdx - 1) + p.contentStart + p.content.length;
+        editor.focus();
+        editor.selectionStart = editor.selectionEnd = pos;
+        lastActiveMasterIdx = prev.masterIndex;
+      }
+      return;
+    }
+
+    const line = lines[lineIdx] || '';
+    const parsed = parseLine(line);
+    if (!fontMetrics) fontMetrics = computeFontMetrics();
+
+    const rect = editor.getBoundingClientRect();
+    const x = e.clientX - rect.left + editor.scrollLeft;
+    const textX = fontMetrics.paddingLeft;
+    const contentX = textX + measureText(line.substring(0, parsed.contentStart));
+    const lineStart = getLineStartPosition(lines, lineIdx);
+
+    // Always take control of caret placement on a node line.  This prevents the
+    // browser from choosing another line when the click is in the gutter or
+    // beyond the visible bubble.
+    e.preventDefault();
+
+    let targetOffset = 0;
+    if (x <= contentX) {
+      // Left of the node: stay on THIS node, never root.
+      gutterPointerDown = true;
+      targetOffset = 0;
+      suppressPointerPlaceholder = true;
+    } else {
+      // Inside/behind the node: find the closest character position on THIS line.
+      const relativeX = x - contentX;
+      let best = 0;
+      let bestDistance = Infinity;
+      for (let i = 0; i <= parsed.content.length; i++) {
+        const d = Math.abs(measureText(parsed.content.substring(0, i)) - relativeX);
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = i;
+        }
+      }
+      targetOffset = best;
+    }
+
+    editor.focus();
+    editor.selectionStart = editor.selectionEnd = lineStart + parsed.contentStart + targetOffset;
+    lastActiveMasterIdx = mapInfo.masterIndex;
+
+    renderOverlay(formatted);
+  });
+
+  editor.addEventListener('mouseup', () => {
+    setTimeout(() => {
+      pointerDownOnEditor = false;
+      gutterPointerDown = false;
+      suppressPointerPlaceholder = false;
+    }, 0);
+  });
 
   document.addEventListener('selectionchange', () => {
     if (document.activeElement !== editor) return;
     const state = getCurrentState();
     let needsApply = false, targetOffset = state.contentOffset, targetMasterIdx = state.masterIndex;
+    let effectiveMasterIdx = state.masterIndex;
+    const atContent = state.lineOffset >= state.rawParsed.contentStart;
 
     manageToolbarVisibility();
 
-    if (state.masterIndex !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
-      if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') { 
-        finalizeNode(masterNodes, lastActiveMasterIdx); 
-        needsApply = true; 
+    // A caret deliberately placed on a non-root node's left edge belongs to
+    // that node.  It must never be redirected to root.
+    if (!atContent && state.masterIndex !== 0) {
+      effectiveMasterIdx = state.masterIndex;
+      targetMasterIdx = state.masterIndex;
+      targetOffset = state.contentOffset;
+    }
+
+    if (effectiveMasterIdx !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
+      if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') {
+        finalizeNode(masterNodes, lastActiveMasterIdx);
+        needsApply = true;
       }
     }
 
-    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content === '?') {
-      if (state.masterIndex === 0) {
+    // Never create a node merely because the user clicked.  Placeholder
+    // expansion is only allowed for a genuine content-position selection,
+    // never for a gutter/behind-node mouse placement.
+    if (
+      atContent &&
+      masterNodes[effectiveMasterIdx] &&
+      masterNodes[effectiveMasterIdx].content === '?'
+    ) {
+      if (effectiveMasterIdx === 0) {
         for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++;
         masterNodes.unshift({ depth: 0, content: '?', folded: false });
-        if(masterNodes[1]) masterNodes[1].content = '';
+        if (masterNodes[1]) masterNodes[1].content = '';
         targetMasterIdx = 1; targetOffset = 0; needsApply = true;
-      } else {
-        masterNodes[state.masterIndex].content = '';
-        masterNodes.splice(state.masterIndex + 1, 0, { depth: masterNodes[state.masterIndex].depth, content: '?', folded: false });
-        targetMasterIdx = state.masterIndex; targetOffset = 0; needsApply = true;
+      } else if (!suppressPointerPlaceholder) {
+        masterNodes[effectiveMasterIdx].content = '';
+        masterNodes.splice(effectiveMasterIdx + 1, 0, { depth: masterNodes[effectiveMasterIdx].depth, content: '?', folded: false });
+        targetMasterIdx = effectiveMasterIdx; targetOffset = 0; needsApply = true;
       }
     }
 
@@ -819,8 +975,8 @@
 
     if (needsApply) {
       renderAndSave(targetMasterIdx, targetOffset);
-    } else if (prevActiveMasterIdx !== targetMasterIdx) {
-      renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
+    } else if (prevActiveMasterIdx !== effectiveMasterIdx) {
+      renderOverlay(formatTreeFromNodes(getVisibleNodes()));
     }
   });
 
@@ -828,6 +984,8 @@
     const state = getCurrentState();
     if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex);
     lastActiveMasterIdx = -1;
+    if (window.innerWidth < 768) toolbar.classList.remove('visible');
+    updateMobileToolbarPadding();
     renderAndSave();
   });
 
