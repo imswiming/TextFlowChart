@@ -1,1255 +1,366 @@
 
+
+Pasted text(20260812-065504).txt
+Document
+i want you to prevent the leftmost caret on any line except root from spawning new root
+
+Yes. The problem is in the selectionchange logic around lines 841–869. 
+
+
+When you click the leftmost area of a non-root line, your code correctly redirects to the root, but then the root ? placeholder logic runs, which creates a new root.
+
+Fix
+Add a one-shot flag:
+
+let suppressPlaceholderSpawn = false;
+Then change the redirect section to:
+
+// Placing the caret at the leftmost/margin of any line except the root
+// placeholder's own line redirects to the root, but must NOT trigger the
+// root placeholder's "spawn new root" behaviour.
+if (!atContent && state.masterIndex !== 0) {
+  effectiveMasterIdx = 0;
+  targetMasterIdx = 0;
+  targetOffset = 0;
+  needsApply = true;
+  atContent = true;
+  suppressPlaceholderSpawn = true;
+}
+And change the placeholder condition from:
+
+if (atContent && masterNodes[effectiveMasterIdx] && masterNodes[effectiveMasterIdx].content === '?') {
+to:
+
+if (
+  atContent &&
+  !suppressPlaceholderSpawn &&
+  masterNodes[effectiveMasterIdx] &&
+  masterNodes[effectiveMasterIdx].content === '?'
+) {
+Finally, reset the flag immediately after the placeholder handling:
+
+suppressPlaceholderSpawn = false;
+So that whole section becomes:
+
+// Placing the caret at the leftmost/margin of any line except the root
+// placeholder's own line redirects to the root, but must NOT trigger the
+// root placeholder's "spawn new root" behaviour.
+if (!atContent && state.masterIndex !== 0) {
+  effectiveMasterIdx = 0;
+  targetMasterIdx = 0;
+  targetOffset = 0;
+  needsApply = true;
+  atContent = true;
+  suppressPlaceholderSpawn = true;
+}
+
+if (effectiveMasterIdx !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
+  if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') { 
+    finalizeNode(masterNodes, lastActiveMasterIdx); 
+    needsApply = true; 
+  }
+}
+
+// Only spawn a new root when the user actually places the caret on the
+// root's own placeholder, not when the root was reached by a margin redirect.
+if (
+  atContent &&
+  !suppressPlaceholderSpawn &&
+  masterNodes[effectiveMasterIdx] &&
+  masterNodes[effectiveMasterIdx].content === '?'
+) {
+  if (effectiveMasterIdx === 0) {
+    for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++;
+    masterNodes.unshift({ depth: 0, content: '?', folded: false });
+    if(masterNodes[1]) masterNodes[1].content = '';
+    targetMasterIdx = 1; targetOffset = 0; needsApply = true;
+  } else {
+    masterNodes[effectiveMasterIdx].content = '';
+    masterNodes.splice(effectiveMasterIdx + 1, 0, {
+      depth: masterNodes[effectiveMasterIdx].depth,
+      content: '?',
+      folded: false
+    });
+    targetMasterIdx = effectiveMasterIdx;
+    targetOffset = 0;
+    needsApply = true;
+  }
+}
+
+suppressPlaceholderSpawn = false;
+And put this with your other state variables around line 281:
+
+let suppressPlaceholderSpawn = false;
+Result
+Click/type at the root ? → still creates a new root exactly as before.
+
+Click the leftmost area of any child/descendant line → redirects to the root without creating a new root.
+
+Enter, Tab, Backspace, New Child, New Parent, etc. remain unchanged.
+
+No existing tree functionality is removed.
+
+
+Done. I kept the original functionality and applied the caret/root spawning fix.
+
+Download the full fixed HTML code 
+
+
+
+tree_hierarchy_text_editor_fixed.html
+HTML
+
+
+DONT REDIRECT TO ROOT
+
+Corrected. The leftmost caret on a non-root line now stays on that line. It does not redirect to root and does not spawn a new root.
+
+Download the corrected full code 
+
+
+
+tree_hierarchy_text_editor_no_root_redirect.html
+HTML
+
+
+if click anywhere behind a node it teleports to left then to root then spawns new root stop this
+
+It seems like I can’t do more advanced data analysis right now. Please try again later. 
+
+
+Chat paused until usage resets at 11:55 PM
+You’ve reached the limit for chats that include files or images. Start a new text-only chat or upgrade to continue now.
+
+New chat
+
+Claim free offer
+
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Tree Hierarchy Text Editor</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;600&display=swap');
 
-  * { box-sizing: border-box; font-family: 'Roboto', sans-serif; }
+<html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> <title>Tree Hierarchy Text Editor</title> <style> @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;600&display=swap');
 
-  body, html {
-    background-color: #0f172a;
-    color: #f8fafc;
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100dvh; 
-    overflow: hidden;
-  }
+{ box-sizing: border-box; font-family: 'Roboto', sans-serif; }
 
-  .container {
-    width: 100%;
-    height: 100%;
-    background: #1e293b;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-  }
+body, html {
+background-color: #0f172a;
+color: #f8fafc;
+margin: 0;
+padding: 0;
+width: 100%;
+height: 100dvh;
+overflow: hidden;
+}
 
-  .toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 10px;
-    background: #1e293b;
-    border-bottom: 1px solid #334155;
-    z-index: 10;
-    flex-shrink: 0;
-  }
+.container {
+width: 100%;
+height: 100%;
+background: #1e293b;
+display: flex;
+flex-direction: column;
+position: relative;
+}
 
-  .toolbar button {
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    color: #f8fafc;
-    background: #334155;
-    border: 1px solid #475569;
-    border-radius: 6px;
-    padding: 8px 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
+.toolbar {
+display: flex;
+flex-wrap: wrap;
+gap: 8px;
+padding: 10px;
+background: #1e293b;
+border-bottom: 1px solid #334155;
+z-index: 10;
+flex-shrink: 0;
+}
 
-  .toolbar button:hover { background: #3f5165; }
-  .toolbar button:active { background: #29394d; }
-  .toolbar button.danger { border-color: #7f1d1d; }
-  .toolbar button.danger:hover { background: #4c1d1d; }
-  .toolbar button.active {
-    background: #0284c7;
-    border-color: #38bdf8;
-    color: #ffffff;
-  }
+.toolbar button {
+font-family: inherit;
+font-size: 13px;
+font-weight: 600;
+color: #f8fafc;
+background: #334155;
+border: 1px solid #475569;
+border-radius: 6px;
+padding: 8px 12px;
+cursor: pointer;
+transition: all 0.15s ease;
+}
 
-  .editor-wrap {
-    position: relative;
-    width: 100%;
-    flex-grow: 1;
-    overflow: hidden;
-    touch-action: pan-x pan-y;
-  }
+.toolbar button { background: #3f5165; }
+.toolbar button { background: #29394d; }
+.toolbar button.danger { border-color: #7f1d1d; }
+.toolbar button.danger { background: #4c1d1d; }
+.toolbar button.active {
+background: #0284c7;
+border-color: #38bdf8;
+color: #ffffff;
+}
 
-  .editor, .editor-overlay {
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    font-family: 'Roboto', sans-serif;
-    font-size: var(--editor-font-size, 14px);
-    line-height: 2;            
-    letter-spacing: 0;
-    font-variant-ligatures: none;
-    -webkit-font-feature-settings: "liga" 0, "calt" 0;
-    font-feature-settings: "liga" 0, "calt" 0;
-    tab-size: 8;
-    padding: var(--editor-padding-top, 18px) 16px 18px 16px;
-    border-radius: 0;
-    white-space: pre;
-    box-sizing: border-box;
-  }
+.editor-wrap {
+position: relative;
+width: 100%;
+flex-grow: 1;
+overflow: hidden;
+touch-action: pan-x pan-y;
+}
 
-  .editor {
-    position: absolute;
-    top: 0; left: 0;
-    z-index: 2;
-    color: transparent;
-    caret-color: #f8fafc;
-    background-color: transparent;
-    border: none;
-    overflow-x: auto;
-    overflow-y: auto;
-    resize: none;
-  }
+.editor, .editor-overlay {
+width: 100%;
+height: 100%;
+margin: 0;
+font-family: 'Roboto', sans-serif;
+font-size: var(--editor-font-size, 14px);
+line-height: 2;
+letter-spacing: 0;
+font-variant-ligatures: none;
+-webkit-font-feature-settings: "liga" 0, "calt" 0;
+font-feature-settings: "liga" 0, "calt" 0;
+tab-size: 8;
+padding: var(--editor-padding-top, 18px) 16px 18px 16px;
+border-radius: 0;
+white-space: pre;
+box-sizing: border-box;
+}
 
-  .editor:focus { outline: none; }
+.editor {
+position: absolute;
+top: 0; left: 0;
+z-index: 2;
+color: transparent;
+caret-color: #f8fafc;
+background-color: transparent;
+border: none;
+overflow-x: auto;
+overflow-y: auto;
+resize: none;
+}
 
-  .editor-overlay {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 1;
-    background-color: #0f172a;
-    overflow: hidden;
-    pointer-events: none;
-  }
+.editor { outline: none; }
 
-  .overlay-content {
-    position: absolute;
-    top: 0; left: 0;
-    color: #f8fafc;
-  }
+.editor-overlay {
+position: absolute;
+top: 0; left: 0; right: 0; bottom: 0;
+z-index: 1;
+background-color: #0f172a;
+overflow: hidden;
+pointer-events: none;
+}
 
-  .node-bubble {
-    position: absolute;
-    border: 1px solid #94a3b8;
-    border-radius: 10px;
-    background-color: rgba(148, 163, 184, 0.10);
-    transition: background-color 0.1s;
-  }
+.overlay-content {
+position: absolute;
+top: 0; left: 0;
+color: #f8fafc;
+}
 
-  .node-bubble.active-node {
-    background-color: rgba(56, 189, 248, 0.2); 
-    border-color: #38bdf8;
-  }
+.node-bubble {
+position: absolute;
+border: 1px solid #94a3b8;
+border-radius: 10px;
+background-color: rgba(148, 163, 184, 0.10);
+transition: background-color 0.1s;
+}
 
-  .node-bubble.assumption {
-    border-color: #f472b6;
-    background-color: rgba(244, 114, 182, 0.18);
-  }
+.node-bubble.active-node {
+background-color: rgba(56, 189, 248, 0.2);
+border-color: #38bdf8;
+}
 
-  .node-bubble.active-node.assumption {
-    background-color: rgba(244, 114, 182, 0.4);
-  }
-  
-  .fold-indicator {
-    position: absolute;
-    right: -10px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 10px;
-    color: #38bdf8;
-    background: #0f172a;
-    border: 1px solid #38bdf8;
-    border-radius: 50%;
-    width: 18px;
-    height: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    user-select: none;
-    pointer-events: auto;
-    box-shadow: 0 0 4px rgba(56, 189, 248, 0.4);
-    transition: all 0.15s ease;
-  }
+.node-bubble.assumption {
+border-color: #f472b6;
+background-color: rgba(244, 114, 182, 0.18);
+}
 
-  .fold-indicator:hover {
-    background: #0284c7;
-    color: #ffffff;
-  }
+.node-bubble.active-node.assumption {
+background-color: rgba(244, 114, 182, 0.4);
+}
 
-  /* Modals */
-  .modal-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.6);
-    z-index: 200;
-    display: none;
-    justify-content: center;
-    align-items: center;
-  }
-  .modal {
-    background: #1e293b;
-    padding: 20px;
-    border-radius: 8px;
-    border: 1px solid #334155;
-    width: 300px;
-    max-width: 90%;
-  }
-  .modal h3 { margin-top: 0; }
-  .modal button, .modal select { width: 100%; margin-top: 10px; padding: 8px; }
+.fold-indicator {
+position: absolute;
+right: -10px;
+top: 50%;
+transform: translateY(-50%);
+font-size: 10px;
+color: #38bdf8;
+background: #0f172a;
+border: 1px solid #38bdf8;
+border-radius: 50%;
+width: 18px;
+height: 18px;
+display: flex;
+align-items: center;
+justify-content: center;
+cursor: pointer;
+user-select: none;
+pointer-events: auto;
+box-shadow: 0 0 4px rgba(56, 189, 248, 0.4);
+transition: all 0.15s ease;
+}
 
-  /* Floating mobile toolbar styles */
-  @media (max-width: 768px) {
-    .toolbar {
-      display: none;
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      right: 12px;
-      z-index: 100;
-      background: rgba(30, 41, 59, 0.92);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      border: 1px solid #475569;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-      max-height: 40vh;
-      overflow-y: auto;
-    }
-    .toolbar.visible { display: flex; }
+.fold-indicator {
+background: #0284c7;
+color: #ffffff;
+}
 
-    /* Padding-top is calculated in JS (updateMobileToolbarPadding) from the
-       toolbar's actual rendered height and applied via the
-       --editor-padding-top CSS variable on the base .editor/.editor-overlay
-       rule above. We intentionally do NOT hardcode a padding-top here -
-       a fixed value doesn't track the toolbar's real height (which changes
-       with wrapping/screen width), which is what let the buttons overlap
-       the text. */
-  }
+/* Modals */
+.modal-overlay {
+position: fixed;
+top: 0; left: 0; right: 0; bottom: 0;
+background: rgba(0,0,0,0.6);
+z-index: 200;
+display: none;
+justify-content: center;
+align-items: center;
+}
+.modal {
+background: #1e293b;
+padding: 20px;
+border-radius: 8px;
+border: 1px solid #334155;
+width: 300px;
+max-width: 90%;
+}
+.modal h3 { margin-top: 0; }
+.modal button, .modal select { width: 100%; margin-top: 10px; padding: 8px; }
+
+/* Floating mobile toolbar styles */
+@media (max-width: 768px) {
+.toolbar {
+display: none;
+position: absolute;
+top: 12px;
+left: 12px;
+right: 12px;
+z-index: 100;
+background: rgba(30, 41, 59, 0.92);
+backdrop-filter: blur(8px);
+-webkit-backdrop-filter: blur(8px);
+border: 1px solid #475569;
+border-radius: 12px;
+box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+max-height: 40vh;
+overflow-y: auto;
+}
+.toolbar.visible { display: flex; }
+
+/* Padding-top is calculated in JS (updateMobileToolbarPadding) from the
+   toolbar's actual rendered height and applied via the
+   --editor-padding-top CSS variable on the base .editor/.editor-overlay
+   rule above. We intentionally do NOT hardcode a padding-top here -
+   a fixed value doesn't track the toolbar's real height (which changes
+   with wrapping/screen width), which is what let the buttons overlap
+   the text. */
+}
 </style>
-</head>
-<body>
 
-<div class="container">
-  <div class="toolbar" id="toolbar">
-    <button id="openBtn" type="button">Open / Save</button>
-    <button id="importExportBtn" type="button">Import / Export</button>
-    <button id="inspireBtn" type="button">Inspire ✨</button>
-    <button id="undoBtn" type="button">Undo</button>
-    <button id="redoBtn" type="button">Redo</button>
-    <button id="newParentBtn" type="button">New Parent</button>
-    <button id="newChildBtn" type="button">New Child</button>
-    <button id="foldBtn" type="button">Fold / Unfold</button>
-    <button id="deleteNodeBtn" type="button" class="danger">Delete</button>
-    <button id="deletePromoteBtn" type="button" class="danger">Promote</button>
-    <button id="moveUpBtn" type="button">Up</button>
-    <button id="moveDownBtn" type="button">Down</button>
-  </div>
+</head> <body>
 
-  <div class="editor-wrap" id="editorWrap">
-    <textarea id="editor" class="editor" spellcheck="false"></textarea>
-    <div id="overlay" class="editor-overlay" aria-hidden="true">
-      <div id="overlay-content" class="overlay-content"></div>
-    </div>
-  </div>
-</div>
+<div class="container"> <div class="toolbar" id="toolbar"> <button id="openBtn" type="button">Open / Save</button> <button id="importExportBtn" type="button">Import / Export</button> <button id="inspireBtn" type="button">Inspire ✨</button> <button id="undoBtn" type="button">Undo</button> <button id="redoBtn" type="button">Redo</button> <button id="newParentBtn" type="button">New Parent</button> <button id="newChildBtn" type="button">New Child</button> <button id="foldBtn" type="button">Fold / Unfold</button> <button id="deleteNodeBtn" type="button" class="danger">Delete</button> <button id="deletePromoteBtn" type="button" class="danger">Promote</button> <button id="moveUpBtn" type="button">Up</button> <button id="moveDownBtn" type="button">Down</button> </div>
 
-<div class="modal-overlay" id="saveModal">
-  <div class="modal">
-    <h3>Save / Load</h3>
-    <select id="savedList"></select>
-    <button id="loadDocBtn">Load Selected</button>
-    <button id="saveDocBtn">Save Current (New)</button>
-    <button id="deleteDocBtn" class="danger">Delete Selected</button>
-    <button id="closeModalBtn">Cancel</button>
-  </div>
-</div>
+<div class="editor-wrap" id="editorWrap"> <textarea id="editor" class="editor" spellcheck="false"></textarea> <div id="overlay" class="editor-overlay" aria-hidden="true"> <div id="overlay-content" class="overlay-content"></div> </div> </div> </div>
 
-<script>
-  const editor = document.getElementById('editor');
-  const editorWrap = document.getElementById('editorWrap');
-  const overlay = document.getElementById('overlay');
-  const overlayContent = document.getElementById('overlay-content');
-  const toolbar = document.getElementById('toolbar');
+<div class="modal-overlay" id="saveModal"> <div class="modal"> <h3>Save / Load</h3> <select id="savedList"></select> <button id="loadDocBtn">Load Selected</button> <button id="saveDocBtn">Save Current (New)</button> <button id="deleteDocBtn" class="danger">Delete Selected</button> <button id="closeModalBtn">Cancel</button> </div> </div>
 
-  const MAX_CONTENT_LENGTH = 50;
-  const INDENT_WIDTH = 24;         // Indent distance per depth level (doubled from the original 12)
-  const GUIDE_LINE_INDENT = 12;    // Original indent width, kept fixed so the drawn hierarchy
-                                    // connector lines stay the same visual length even though the
-                                    // indent distance itself doubled (see renderOverlay below)
-  const NODE_MARK = '\u200B';      
+<script> const editor = document.getElementById('editor'); const editorWrap = document.getElementById('editorWrap'); const overlay = document.getElementById('overlay'); const overlayContent = document.getElementById('overlay-content'); const toolbar = document.getElementById('toolbar'); const MAX_CONTENT_LENGTH = 50; const INDENT_WIDTH = 24; // Indent distance per depth level (doubled from the original 12) const GUIDE_LINE_INDENT = 12; // Original indent width, kept fixed so the drawn hierarchy // connector lines stay the same visual length even though the // indent distance itself doubled (see renderOverlay below) const NODE_MARK = '\u200B'; // FIX: buttons in the toolbar were stealing focus from the editor on tap, which triggered a // blur (closing the keyboard and hiding the floating mobile toolbar) before the click event // ever reached the button - so buttons appeared to "do nothing but close the menu". Blocking // the default mousedown/touchstart behavior keeps the editor focused while a toolbar button // is being tapped, so the click goes through normally afterwards. const preventToolbarFocusSteal = (e) => { e.preventDefault(); }; toolbar.addEventListener('mousedown', preventToolbarFocusSteal); toolbar.addEventListener('touchstart', preventToolbarFocusSteal, { passive: false }); let inspireActive = false; let masterNodes = []; let lastActiveMasterIdx = -1; let currentDocName = 'default'; let currentFontSize = parseInt(localStorage.getItem('tree_zoom')) || 14; document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px'); class HistoryManager { constructor() { this.undoStack = []; this.redoStack = []; this.isTracking = true; } save(nodesState, pos) { if (!this.isTracking) return; const serialized = JSON.stringify(nodesState); if (this.undoStack.length === 0 || this.undoStack[this.undoStack.length - 1].data !== serialized) { this.undoStack.push({ data: serialized, pos }); this.redoStack = []; } } undo(callback) { if (this.undoStack.length > 1) { this.isTracking = false; this.redoStack.push(this.undoStack.pop()); const state = this.undoStack[this.undoStack.length - 1]; masterNodes = JSON.parse(state.data); callback(state.pos); this.isTracking = true; triggerAutoSave(); } } redo(callback) { if (this.redoStack.length > 0) { this.isTracking = false; const state = this.redoStack.pop(); this.undoStack.push(state); masterNodes = JSON.parse(state.data); callback(state.pos); this.isTracking = true; triggerAutoSave(); } } } const historyMgr = new HistoryManager(); function triggerAutoSave() { localStorage.setItem('tree_doc_' + currentDocName, JSON.stringify(masterNodes)); localStorage.setItem('last_open_doc', currentDocName); } function parseLine(rawLine) { const unit = ' '.repeat(INDENT_WIDTH); let depth = 0, offset = 0; while (rawLine.substr(offset, INDENT_WIDTH) === unit) { depth++; offset += INDENT_WIDTH; } const prefixLength = offset; const markerLength = rawLine[offset] === NODE_MARK ? 1 : 0; const contentStart = offset + markerLength; const content = rawLine.substring(contentStart); return { depth, content, prefixLength, markerLength, contentStart, isNodeConnector: markerLength === 1 }; } function parseDocumentToNodes(text) { const rawLines = text.split('\n'); const nodes = []; for (let i = 0; i < rawLines.length; i++) { if (rawLines[i].length === 0) continue; const parsed = parseLine(rawLines[i]); const prevNode = nodes.length ? nodes[nodes.length - 1] : null; if (prevNode && prevNode.depth === parsed.depth && !parsed.isNodeConnector) { prevNode.content += (prevNode.content ? ' ' : '') + parsed.content; } else { nodes.push({ depth: parsed.depth, content: parsed.content, folded: false }); } } if (nodes.length === 0) nodes.push({ depth: 0, content: '?', folded: false }); return nodes; } function hasChildren(nodes, idx) { return idx + 1 < nodes.length && nodes[idx + 1].depth > nodes[idx].depth; } function getSubtreeEnd(nodes, idx) { const depth = nodes[idx].depth; let j = idx + 1; while (j < nodes.length && nodes[j].depth > depth) j++; return j; } function getVisibleNodes() { const visible = []; let suppressDepth = -1; for (let i = 0; i < masterNodes.length; i++) { const node = masterNodes[i]; if (suppressDepth !== -1) { if (node.depth > suppressDepth) { continue; } else { suppressDepth = -1; } } visible.push({ ...node, masterIndex: i }); if (node.folded && hasChildren(masterNodes, i)) { suppressDepth = node.depth; } } return visible; } function capitalizeFirst(content) { if (!content) return content; return content.charAt(0).toUpperCase() + content.slice(1); } function finalizeNode(nodes, idx) { const node = nodes[idx]; if (!node) return; const match = node.content.match(/^([Aa],)(\s*)(.*)$/); if (match && node.depth > 0) node.content = `Assumption: ${match[3]}`; node.content = capitalizeFirst(node.content); } function wrapText(text, maxLen) { if (!text || text.length <= maxLen) return [text || '']; const words = text.split(' '), lines = []; let cur = ''; for (const w of words) { if (!cur) { if (w.length > maxLen) { lines.push(w.substring(0, maxLen)); cur = w.substring(maxLen); } else cur = w; } else if (cur.length + 1 + w.length <= maxLen) cur += ' ' + w; else { lines.push(cur); cur = w; } } if (cur) lines.push(cur); return lines; } function formatTreeFromNodes(visibleNodes) { const formattedLines = [], lineToNodeMap = [], rowGuides = []; for (let i = 0; i < visibleNodes.length; i++) { const node = visibleNodes[i]; const depth = node.depth; const wrapped = wrapText(node.content, MAX_CONTENT_LENGTH); let hasLaterSibling = false; for (let j = i + 1; j < visibleNodes.length; j++) { if (visibleNodes[j].depth < depth) break; if (visibleNodes[j].depth === depth) { hasLaterSibling = true; break; } } const ancestorSegs = []; for (let d = 1; d < depth; d++) { let hasLaterAncestorSibling = false; for (let j = i + 1; j < visibleNodes.length; j++) { if (visibleNodes[j].depth < d) break; if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; } } if (hasLaterAncestorSibling) ancestorSegs.push({ col: d, kind: 'through' }); } for (let w = 0; w < wrapped.length; w++) { const isFirst = w === 0; formattedLines.push(' '.repeat(depth * INDENT_WIDTH) + (isFirst ? NODE_MARK : '') + wrapped[w]); lineToNodeMap.push({ visibleIndex: i, masterIndex: node.masterIndex, isFirstLine: isFirst }); const segs = ancestorSegs.slice(); if (depth > 0) { if (isFirst) segs.push({ col: depth, kind: hasLaterSibling ? 'elbow-tee' : 'elbow-corner' }); else if (hasLaterSibling) segs.push({ col: depth, kind: 'through' }); } rowGuides.push(segs); } if (i + 1 < visibleNodes.length) { formattedLines.push(''); lineToNodeMap.push(null); const spacerSegs = []; const nextNode = visibleNodes[i + 1]; for (let d = 1; d < nextNode.depth; d++) { let hasLaterAncestorSibling = false; for (let j = i + 1; j < visibleNodes.length; j++) { if (visibleNodes[j].depth < d) break; if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; } } if (hasLaterAncestorSibling) spacerSegs.push({ col: d, kind: 'through' }); } if (nextNode.depth > 0) spacerSegs.push({ col: nextNode.depth, kind: 'through' }); rowGuides.push(spacerSegs); } } return { text: formattedLines.join('\n'), visibleNodes, lineToNodeMap, rowGuides }; } let fontMetrics = null; function measureText(text) { let probe = document.getElementById('probe-span'); if (!probe) { probe = document.createElement('span'); probe.id = 'probe-span'; probe.style.position = 'absolute'; probe.style.visibility = 'hidden'; probe.style.whiteSpace = 'pre'; document.body.appendChild(probe); } const cs = getComputedStyle(editor); probe.style.fontFamily = cs.fontFamily; probe.style.fontSize = cs.fontSize; probe.textContent = text || 'a'; return probe.getBoundingClientRect().width; } function computeFontMetrics() { const cs = getComputedStyle(editor); return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) }; } function updateMobileToolbarPadding() { if (window.innerWidth <= 768 && toolbar.classList.contains('visible')) { const toolbarHeight = toolbar.offsetHeight; const topPadding = toolbarHeight + 20; document.documentElement.style.setProperty('--editor-padding-top', topPadding + 'px'); } else { document.documentElement.style.setProperty('--editor-padding-top', '18px'); } fontMetrics = null; } function computeNodeBoxes(formatted) { const lines = formatted.text.split('\n'); const { lineToNodeMap, visibleNodes } = formatted; const boxes = []; let i = 0; while (i < lines.length) { const mapInfo = lineToNodeMap[i]; if (!mapInfo) { i++; continue; } const visIndex = mapInfo.visibleIndex; const masterIndex = mapInfo.masterIndex; const node = visibleNodes[visIndex]; if (!node) { i++; continue; } let j = i, startCol = null, maxPxWidth = 0, hasContent = false; while (j < lines.length && lineToNodeMap[j] && lineToNodeMap[j].visibleIndex === visIndex) { const parsed = parseLine(lines[j]); if (startCol === null) startCol = parsed.prefixLength; if (parsed.content.length > 0) { hasContent = true; maxPxWidth = Math.max(maxPxWidth, measureText(parsed.content)); } else if (!hasContent) { maxPxWidth = measureText(' '.repeat(18)); hasContent = true; } j++; } let textOverlayContent = ''; for(let k=i; k<j; k++) textOverlayContent += (k>i?'\n':'') + parseLine(lines[k]).content; // Placeholder nodes ('?') get the same box size as a genuinely empty node, with the '?' // centered in the middle of that box, instead of being sized to the narrow '?' glyph. const isPlaceholder = node.content === '?'; if (isPlaceholder) maxPxWidth = measureText(' '.repeat(18)); boxes.push({ visIndex, masterIndex, lineStart: i, lineCount: j - i, prefixPxWidth: measureText(' '.repeat(startCol)), maxPxWidth, isAssumption: node.content.startsWith('Assumption:'), isFolded: node.folded, isPlaceholder, textOverlayContent }); i = j; } return boxes; } function syncOverlayScroll() { overlayContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`; } const SVG_NS = 'http://www.w3.org/2000/svg'; function renderOverlay(formatted) { if (!fontMetrics) fontMetrics = computeFontMetrics(); const { lineHeight, paddingLeft, paddingTop } = fontMetrics; overlayContent.innerHTML = ''; const frag = document.createDocumentFragment(); computeNodeBoxes(formatted).forEach(b => { const div = document.createElement('div'); div.className = 'node-bubble' + (b.isAssumption ? ' assumption' : '') + (b.masterIndex === lastActiveMasterIdx ? ' active-node' : ''); div.style.left = (paddingLeft + b.prefixPxWidth - 12) + 'px'; div.style.top = (paddingTop + b.lineStart * lineHeight - 4) + 'px'; div.style.width = (b.maxPxWidth + 24) + 'px'; div.style.height = (b.lineCount * lineHeight - 3 + 8) + 'px'; const txt = document.createElement('div'); txt.style.position = 'absolute'; if (b.isPlaceholder) { txt.style.left = '0'; txt.style.top = '0'; txt.style.width = '100%'; txt.style.height = '100%'; txt.style.display = 'flex'; txt.style.alignItems = 'center'; txt.style.justifyContent = 'center'; } else { txt.style.left = '12px'; txt.style.top = '4px'; } txt.textContent = b.textOverlayContent; div.appendChild(txt); if (hasChildren(masterNodes, b.masterIndex)) { const foldInd = document.createElement('div'); foldInd.className = 'fold-indicator'; foldInd.textContent = b.isFolded ? '▶' : '▼'; foldInd.title = b.isFolded ? 'Click to Unfold' : 'Click to Fold'; foldInd.onclick = (e) => { e.stopPropagation(); toggleFold(b.masterIndex); }; div.appendChild(foldInd); } frag.appendChild(div); }); const svg = document.createElementNS(SVG_NS, 'svg'); svg.setAttribute('width', paddingLeft * 2 + 3000); svg.setAttribute('height', paddingTop * 2 + formatted.rowGuides.length * lineHeight); svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.overflow = 'visible'; const mkLine = (x1, y1, x2, y2) => { const l = document.createElementNS(SVG_NS, 'line'); l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2); l.setAttribute('stroke', '#64748b'); l.setAttribute('stroke-width', '1.5'); l.setAttribute('stroke-linecap', 'round'); svg.appendChild(l); }; // The connector line's pixel length is derived from the ORIGINAL (pre-doubling) indent // width, so it stays visually the same length. Only its position (armEndX, tied to the // new, doubled INDENT_WIDTH) moves further right as depth increases - i.e. the indent // distance itself doubles, but the drawn hierarchy line does not stretch. const guideLinePxLength = measureText(' '.repeat(Math.max(0, GUIDE_LINE_INDENT - 3))) - 14; formatted.rowGuides.forEach((segs, row) => { const yTop = paddingTop + row * lineHeight, yMid = yTop + lineHeight / 2, yBottom = yTop + lineHeight; segs.forEach(seg => { const armEndX = paddingLeft + measureText(' '.repeat(seg.col * INDENT_WIDTH)) - 14; const trunkX = armEndX - guideLinePxLength; if (seg.kind === 'through') mkLine(trunkX, yTop, trunkX, yBottom); else if (seg.kind === 'elbow-tee') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); mkLine(trunkX, yMid, trunkX, yBottom); } else if (seg.kind === 'elbow-corner') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); } }); }); frag.appendChild(svg); overlayContent.appendChild(frag); syncOverlayScroll(); } function renderAndSave(targetMasterIdx = -1, contentOffset = 0) { const visible = getVisibleNodes(); const formatted = formatTreeFromNodes(visible); editor.value = formatted.text; renderOverlay(formatted); if (targetMasterIdx !== -1) { restoreCursorForMasterNode(targetMasterIdx, contentOffset); } historyMgr.save(masterNodes, editor.selectionStart); triggerAutoSave(); } let scrollTimeout; editor.addEventListener('scroll', () => { syncOverlayScroll(); clearTimeout(scrollTimeout); scrollTimeout = setTimeout(() => { localStorage.setItem('last_scroll_left_' + currentDocName, editor.scrollLeft); localStorage.setItem('last_scroll_top_' + currentDocName, editor.scrollTop); }, 200); }); window.addEventListener('resize', () => { updateMobileToolbarPadding(); fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); }); function updateFontSize(newSize) { const clamped = Math.max(8, Math.min(48, Math.round(newSize))); if (clamped === currentFontSize) return; currentFontSize = clamped; document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px'); localStorage.setItem('tree_zoom', currentFontSize); fontMetrics = null; renderOverlay(formatTreeFromNodes(getVisibleNodes())); } // Zoom Gestures editorWrap.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); const delta = e.deltaY < 0 ? 1 : -1; updateFontSize(currentFontSize + delta); } }, { passive: false }); let initialPinchDistance = null; let initialPinchFontSize = currentFontSize; function getDistance(touches) { const dx = touches[0].clientX - touches[1].clientX; const dy = touches[0].clientY - touches[1].clientY; return Math.hypot(dx, dy); } editorWrap.addEventListener('touchstart', (e) => { if (e.touches.length === 2) { initialPinchDistance = getDistance(e.touches); initialPinchFontSize = currentFontSize; } }, { passive: true }); editorWrap.addEventListener('touchmove', (e) => { if (e.touches.length === 2 && initialPinchDistance) { e.preventDefault(); const currentDist = getDistance(e.touches); const scale = currentDist / initialPinchDistance; updateFontSize(initialPinchFontSize * scale); } }, { passive: false }); const resetPinch = () => { initialPinchDistance = null; }; editorWrap.addEventListener('touchend', resetPinch); editorWrap.addEventListener('touchcancel', resetPinch); function getCurrentState() { const start = editor.selectionStart, lines = editor.value.split('\n'); let charCount = 0, currentLineIdx = 0; for (let i = 0; i < lines.length; i++) { if (start <= charCount + lines[i].length) { currentLineIdx = i; break; } charCount += lines[i].length + 1; } const visible = getVisibleNodes(); const formatted = formatTreeFromNodes(visible); const mapInfo = formatted.lineToNodeMap[currentLineIdx] || (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { visibleIndex: 0 }); const visIdx = mapInfo ? mapInfo.visibleIndex : 0; const visNode = visible[visIdx] || visible[0]; const masterIdx = visNode ? visNode.masterIndex : 0; let contentOffset = 0; for (let i = 0; i < currentLineIdx; i++) { if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].visibleIndex === visIdx) { contentOffset += parseLine(lines[i]).content.length + 1; } } const curParsed = parseLine(lines[currentLineIdx] || ''); contentOffset += Math.max(0, (start - charCount) - curParsed.contentStart); return { visibleIndex: visIdx, masterIndex: masterIdx, contentOffset, lineIndex: currentLineIdx, lineOffset: start - charCount, rawParsed: curParsed }; } function getVisibleMasterIdx(targetMasterIdx) { const visible = getVisibleNodes(); for (let v of visible) { if (v.masterIndex === targetMasterIdx) return targetMasterIdx; } let cur = targetMasterIdx; while (cur >= 0) { if (visible.some(v => v.masterIndex === cur)) return cur; cur--; } return 0; } function restoreCursorForMasterNode(targetMasterIdx, contentOffset) { const visMasterIdx = getVisibleMasterIdx(targetMasterIdx); const visible = getVisibleNodes(); const visIdx = visible.findIndex(v => v.masterIndex === visMasterIdx); if (visIdx === -1) return; const formatted = formatTreeFromNodes(visible); const lines = formatted.text.split('\n'); let accum = 0, targetLineIdx = 0, lineContentOffset = 0; for (let i = 0; i < lines.length; i++) { const mapInfo = formatted.lineToNodeMap[i]; if (mapInfo && mapInfo.visibleIndex === visIdx) { const p = parseLine(lines[i]); if (contentOffset <= accum + p.content.length || i === lines.length - 1 || (formatted.lineToNodeMap[i + 1] && formatted.lineToNodeMap[i + 1].visibleIndex !== visIdx)) { targetLineIdx = i; lineContentOffset = Math.max(0, contentOffset - accum); break; } accum += p.content.length + 1; } } let pos = 0; for (let j = 0; j < targetLineIdx && j < lines.length; j++) pos += lines[j].length + 1; const targetParsed = parseLine(lines[targetLineIdx] || ''); editor.selectionStart = editor.selectionEnd = Math.min(formatted.text.length, Math.max(0, pos + targetParsed.contentStart + Math.min(targetParsed.content.length, lineContentOffset))); } editor.addEventListener('input', () => { const state = getCurrentState(); const visible = getVisibleNodes(); const formatted = formatTreeFromNodes(visible); const parsedLines = editor.value.split('\n'); for (let i = 0; i < formatted.lineToNodeMap.length; i++) { const mapInfo = formatted.lineToNodeMap[i]; if (mapInfo && mapInfo.isFirstLine) { const visIdx = mapInfo.visibleIndex; const masterIdx = mapInfo.masterIndex; let text = parseLine(parsedLines[i]).content; let k = i + 1; while (k < parsedLines.length && formatted.lineToNodeMap[k] && formatted.lineToNodeMap[k].visibleIndex === visIdx) { text += ' ' + parseLine(parsedLines[k]).content; k++; } if (masterNodes[masterIdx]) { masterNodes[masterIdx].content = text; } } } if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content.startsWith(' ') && state.contentOffset === 1) { masterNodes[state.masterIndex].depth += 1; masterNodes[state.masterIndex].content = masterNodes[state.masterIndex].content.substring(1); renderAndSave(state.masterIndex, 0); return; } renderAndSave(state.masterIndex, state.contentOffset); }); function manageToolbarVisibility() { const state = getCurrentState(); const isMarginClick = state.lineOffset < state.rawParsed.contentStart; // A margin/leftmost click on any line other than the root's own line is redirected to the // root placeholder (see selectionchange below) rather than dismissed - so don't blur/hide // the toolbar for that case, or the redirect would just close the keyboard on the user. const isRootRedirect = isMarginClick && state.masterIndex !== 0; if (document.activeElement !== editor || (isMarginClick && !isRootRedirect)) { if(window.innerWidth < 768) toolbar.classList.remove('visible'); editor.blur(); } else { toolbar.classList.add('visible'); } updateMobileToolbarPadding(); renderOverlay(formatTreeFromNodes(getVisibleNodes())); } document.addEventListener('selectionchange', () => { if (document.activeElement !== editor) return; const state = getCurrentState(); let needsApply = false, targetOffset = state.contentOffset, targetMasterIdx = state.masterIndex; let effectiveMasterIdx = state.masterIndex; // Whether we should treat the caret as sitting at/after the node's real content (as opposed // to the leading indent/gutter area before it). let atContent = state.lineOffset >= state.rawParsed.contentStart; manageToolbarVisibility(); // Placing the caret at the leftmost/margin of any line except the root placeholder's own // line acts as a shortcut for pressing the root placeholder: redirect straight to the root // node's content. (Margin clicks on the root's own line fall through unchanged - no redirect // needed since you're already there.) if (!atContent && state.masterIndex !== 0) { effectiveMasterIdx = 0; targetMasterIdx = 0; targetOffset = 0; needsApply = true; atContent = true; } if (effectiveMasterIdx !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) { if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') { finalizeNode(masterNodes, lastActiveMasterIdx); needsApply = true; } } // Only treat this as "the user is about to type into the placeholder node" when the caret is // actually at/after the node's content start (including via the root-redirect above) - // otherwise a plain margin click on the root's own line would spawn a phantom child. if (atContent && masterNodes[effectiveMasterIdx] && masterNodes[effectiveMasterIdx].content === '?') { if (effectiveMasterIdx === 0) { for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++; masterNodes.unshift({ depth: 0, content: '?', folded: false }); if(masterNodes[1]) masterNodes[1].content = ''; targetMasterIdx = 1; targetOffset = 0; needsApply = true; } else { masterNodes[effectiveMasterIdx].content = ''; masterNodes.splice(effectiveMasterIdx + 1, 0, { depth: masterNodes[effectiveMasterIdx].depth, content: '?', folded: false }); targetMasterIdx = effectiveMasterIdx; targetOffset = 0; needsApply = true; } } const prevActiveMasterIdx = lastActiveMasterIdx; lastActiveMasterIdx = targetMasterIdx; if (needsApply) { renderAndSave(targetMasterIdx, targetOffset); } else if (prevActiveMasterIdx !== effectiveMasterIdx) { renderOverlay(formatTreeFromNodes(getVisibleNodes())); } }); editor.addEventListener('blur', () => { const state = getCurrentState(); if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex); lastActiveMasterIdx = -1; if (window.innerWidth < 768) toolbar.classList.remove('visible'); updateMobileToolbarPadding(); renderAndSave(); }); editor.addEventListener('keydown', (e) => { if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); historyMgr.undo((pos) => renderAndSave()); return; } if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) { e.preventDefault(); historyMgr.redo((pos) => renderAndSave()); return; } if (editor.selectionStart !== editor.selectionEnd) return; const state = getCurrentState(), node = masterNodes[state.masterIndex]; if (!node) return; if (e.key === ' ' && node.content === '-' && state.contentOffset === 1) { e.preventDefault(); node.content = ''; masterNodes.splice(state.masterIndex + 1, 0, { depth: node.depth, content: '', folded: false }); lastActiveMasterIdx = state.masterIndex + 1; renderAndSave(lastActiveMasterIdx, 0); } else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) { e.preventDefault(); finalizeNode(masterNodes, state.masterIndex); const end = getSubtreeEnd(masterNodes, state.masterIndex); for(let i = state.masterIndex; i < end; i++) masterNodes[i].depth++; renderAndSave(state.masterIndex, 0); } else if (e.key === 'Enter') { e.preventDefault(); finalizeNode(masterNodes, state.masterIndex); let insertIdx = state.masterIndex + 1; if (node.folded && hasChildren(masterNodes, state.masterIndex)) { insertIdx = getSubtreeEnd(masterNodes, state.masterIndex); } masterNodes.splice(insertIdx, 0, { depth: node.depth, content: '', folded: false }); lastActiveMasterIdx = insertIdx; renderAndSave(lastActiveMasterIdx, 0); } else if (e.key === 'Tab') { e.preventDefault(); finalizeNode(masterNodes, state.masterIndex); const end = getSubtreeEnd(masterNodes, state.masterIndex); if (e.shiftKey && node.depth > 0) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--; } else if (!e.shiftKey) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth++; } renderAndSave(state.masterIndex, state.contentOffset); } else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) { e.preventDefault(); finalizeNode(masterNodes, state.masterIndex); const end = getSubtreeEnd(masterNodes, state.masterIndex); for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--; renderAndSave(state.masterIndex, 0); } }); function toggleFold(masterIdx) { if (masterIdx < 0 || masterIdx >= masterNodes.length) return; if (!hasChildren(masterNodes, masterIdx)) return; masterNodes[masterIdx].folded = !masterNodes[masterIdx].folded; renderAndSave(masterIdx); } const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(masterNodes, editor.selectionStart); triggerAutoSave(); }; document.getElementById('inspireBtn').onclick = wrapAction(() => { inspireActive = !inspireActive; document.getElementById('inspireBtn').classList.toggle('active', inspireActive); if (inspireActive) { const newNodes = [masterNodes[0] || { depth: 0, content: '?', folded: false }]; for (let i = 1; i < masterNodes.length; i++) { if(masterNodes[i].content === '?') continue; newNodes.push(masterNodes[i]); let nextDepth = i + 1 < masterNodes.length ? masterNodes[i+1].depth : 0; for (let d = masterNodes[i].depth; d > nextDepth; d--) newNodes.push({ depth: d, content: '?', folded: false }); } masterNodes = newNodes; } else { masterNodes = masterNodes.filter((n, i) => i === 0 || n.content.trim() !== '?'); } renderAndSave(0, 0); editor.focus(); }); document.getElementById('newParentBtn').onclick = wrapAction(() => { const state = getCurrentState(); if (!masterNodes[state.masterIndex]) return; const end = getSubtreeEnd(masterNodes, state.masterIndex); for (let i = state.masterIndex; i < end; i++) masterNodes[i].depth++; masterNodes.splice(state.masterIndex, 0, { depth: masterNodes[state.masterIndex].depth - 1, content: '', folded: false }); lastActiveMasterIdx = state.masterIndex; renderAndSave(state.masterIndex, 0); editor.focus(); }); document.getElementById('newChildBtn').onclick = wrapAction(() => { const state = getCurrentState(); if (!masterNodes[state.masterIndex]) return; masterNodes[state.masterIndex].folded = false; masterNodes.splice(state.masterIndex + 1, 0, { depth: masterNodes[state.masterIndex].depth + 1, content: '', folded: false }); lastActiveMasterIdx = state.masterIndex + 1; renderAndSave(lastActiveMasterIdx, 0); editor.focus(); }); document.getElementById('foldBtn').onclick = wrapAction(() => { const state = getCurrentState(); toggleFold(state.masterIndex); editor.focus(); }); document.getElementById('deleteNodeBtn').onclick = wrapAction(() => { const state = getCurrentState(), idx = state.masterIndex; if (masterNodes.length <= 1) masterNodes[0] = { depth: 0, content: '?', folded: false }; else { const end = getSubtreeEnd(masterNodes, idx); masterNodes.splice(idx, end - idx); if(!masterNodes.length) masterNodes.push({depth:0, content:'?', folded: false}); } renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus(); }); document.getElementById('deletePromoteBtn').onclick = wrapAction(() => { const idx = getCurrentState().masterIndex; if (!masterNodes[idx] || masterNodes[idx].depth === 0) return; const end = getSubtreeEnd(masterNodes, idx); for (let i = idx + 1; i < end; i++) masterNodes[i].depth--; masterNodes.splice(idx, 1); renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus(); }); document.getElementById('moveUpBtn').onclick = wrapAction(() => { const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx); let prevStart = idx - 1; while (prevStart >= 0 && masterNodes[prevStart].depth > masterNodes[idx].depth) prevStart--; if (prevStart < 0 || masterNodes[prevStart].depth !== masterNodes[idx].depth) return; masterNodes.splice(prevStart, 0, ...masterNodes.splice(idx, end - idx)); renderAndSave(prevStart, 0); editor.focus(); }); document.getElementById('moveDownBtn').onclick = wrapAction(() => { const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx); if (end >= masterNodes.length || masterNodes[end].depth !== masterNodes[idx].depth) return; const nextEnd = getSubtreeEnd(masterNodes, end); masterNodes.splice(idx + (nextEnd - end), 0, ...masterNodes.splice(idx, end - idx)); renderAndSave(idx + (nextEnd - end), 0); editor.focus(); }); // Save/Load logic document.getElementById('openBtn').onclick = () => { const select = document.getElementById('savedList'); select.innerHTML = ''; const keys = Object.keys(localStorage).filter(k => k.startsWith('tree_doc_')); keys.forEach(k => { const opt = document.createElement('option'); opt.value = k; opt.textContent = k.replace('tree_doc_', '') + (k.replace('tree_doc_', '') === currentDocName ? ' (Current)' : ''); select.appendChild(opt); }); document.getElementById('saveModal').style.display = 'flex'; }; document.getElementById('closeModalBtn').onclick = () => document.getElementById('saveModal').style.display = 'none'; document.getElementById('saveDocBtn').onclick = () => { const name = prompt('Name your document:', currentDocName !== 'default' ? currentDocName : ''); if(name) { currentDocName = name; triggerAutoSave(); document.getElementById('closeModalBtn').click(); } }; function loadDocByName(docKey) { currentDocName = docKey.replace('tree_doc_', ''); const raw = localStorage.getItem(docKey); if (raw) { try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) masterNodes = parsed; else masterNodes = parseDocumentToNodes(raw); } catch(e) { masterNodes = parseDocumentToNodes(raw); } } renderAndSave(); setTimeout(() => { editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0; editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0; }, 0); localStorage.setItem('last_open_doc', currentDocName); } document.getElementById('loadDocBtn').onclick = () => { const val = document.getElementById('savedList').value; if(val) { loadDocByName(val); document.getElementById('closeModalBtn').click(); } }; document.getElementById('deleteDocBtn').onclick = () => { const val = document.getElementById('savedList').value; if(val) { localStorage.removeItem(val); localStorage.removeItem('last_scroll_left_' + val.replace('tree_doc_', '')); localStorage.removeItem('last_scroll_top_' + val.replace('tree_doc_', '')); document.getElementById('openBtn').click(); } }; document.getElementById('importExportBtn').onclick = () => { const text = formatTreeFromNodes(getVisibleNodes()).text; navigator.clipboard.writeText(text).then(() => { const paste = prompt("Exported to clipboard! Paste plain text here to Import (or click Cancel):"); if (paste) { masterNodes = parseDocumentToNodes(paste); renderAndSave(0, 0); } }); }; // Initialization & Load State const savedDoc = localStorage.getItem('last_open_doc'); if (savedDoc && localStorage.getItem('tree_doc_' + savedDoc)) { loadDocByName('tree_doc_' + savedDoc); } else { masterNodes = [{ depth: 0, content: '?', folded: false }]; renderAndSave(); } if (document.fonts && document.fonts.ready) { document.fonts.ready.then(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }); } else { setTimeout(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }, 200); } </script>
 
-  // Toolbar buttons must retain their native touch/click behavior on mobile.
-  // Do not prevent mousedown/touchstart here: doing so can suppress the synthetic
-  // click event generated by iOS/Android and make the buttons appear unresponsive.
+</body> </html>
 
-  let inspireActive = false;
-  let masterNodes = [];
-  let lastActiveMasterIdx = -1;
-  let currentDocName = 'default';
-  let currentFontSize = parseInt(localStorage.getItem('tree_zoom')) || 14;
 
-  document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
-
-  class HistoryManager {
-    constructor() {
-      this.undoStack = [];
-      this.redoStack = [];
-      this.isTracking = true;
-    }
-    save(nodesState, pos) {
-      if (!this.isTracking) return;
-      const serialized = JSON.stringify(nodesState);
-      if (this.undoStack.length === 0 || this.undoStack[this.undoStack.length - 1].data !== serialized) {
-        this.undoStack.push({ data: serialized, pos });
-        this.redoStack = [];
-      }
-    }
-    undo(callback) {
-      if (this.undoStack.length > 1) {
-        this.isTracking = false;
-        this.redoStack.push(this.undoStack.pop());
-        const state = this.undoStack[this.undoStack.length - 1];
-        masterNodes = JSON.parse(state.data);
-        callback(state.pos);
-        this.isTracking = true;
-        triggerAutoSave();
-      }
-    }
-    redo(callback) {
-      if (this.redoStack.length > 0) {
-        this.isTracking = false;
-        const state = this.redoStack.pop();
-        this.undoStack.push(state);
-        masterNodes = JSON.parse(state.data);
-        callback(state.pos);
-        this.isTracking = true;
-        triggerAutoSave();
-      }
-    }
-  }
-  const historyMgr = new HistoryManager();
-
-  function triggerAutoSave() {
-    localStorage.setItem('tree_doc_' + currentDocName, JSON.stringify(masterNodes));
-    localStorage.setItem('last_open_doc', currentDocName);
-  }
-
-  function parseLine(rawLine) {
-    const unit = ' '.repeat(INDENT_WIDTH);
-    let depth = 0, offset = 0;
-    while (rawLine.substr(offset, INDENT_WIDTH) === unit) { depth++; offset += INDENT_WIDTH; }
-    const prefixLength = offset; 
-    const markerLength = rawLine[offset] === NODE_MARK ? 1 : 0;
-    const contentStart = offset + markerLength; 
-    const content = rawLine.substring(contentStart);
-    return { depth, content, prefixLength, markerLength, contentStart, isNodeConnector: markerLength === 1 };
-  }
-
-  function parseDocumentToNodes(text) {
-    const rawLines = text.split('\n');
-    const nodes = [];
-    for (let i = 0; i < rawLines.length; i++) {
-      if (rawLines[i].length === 0) continue; 
-      const parsed = parseLine(rawLines[i]);
-      const prevNode = nodes.length ? nodes[nodes.length - 1] : null;
-      if (prevNode && prevNode.depth === parsed.depth && !parsed.isNodeConnector) {
-        prevNode.content += (prevNode.content ? ' ' : '') + parsed.content;
-      } else {
-        nodes.push({ depth: parsed.depth, content: parsed.content, folded: false });
-      }
-    }
-    if (nodes.length === 0) nodes.push({ depth: 0, content: '?', folded: false });
-    return nodes;
-  }
-
-  function hasChildren(nodes, idx) {
-    return idx + 1 < nodes.length && nodes[idx + 1].depth > nodes[idx].depth;
-  }
-
-  function getSubtreeEnd(nodes, idx) {
-    const depth = nodes[idx].depth;
-    let j = idx + 1;
-    while (j < nodes.length && nodes[j].depth > depth) j++;
-    return j;
-  }
-
-  function getVisibleNodes() {
-    const visible = [];
-    let suppressDepth = -1;
-    for (let i = 0; i < masterNodes.length; i++) {
-      const node = masterNodes[i];
-      if (suppressDepth !== -1) {
-        if (node.depth > suppressDepth) {
-          continue;
-        } else {
-          suppressDepth = -1;
-        }
-      }
-      visible.push({ ...node, masterIndex: i });
-      if (node.folded && hasChildren(masterNodes, i)) {
-        suppressDepth = node.depth;
-      }
-    }
-    return visible;
-  }
-
-  function capitalizeFirst(content) {
-    if (!content) return content;
-    return content.charAt(0).toUpperCase() + content.slice(1);
-  }
-
-  function finalizeNode(nodes, idx) {
-    const node = nodes[idx];
-    if (!node) return;
-    const match = node.content.match(/^([Aa],)(\s*)(.*)$/);
-    if (match && node.depth > 0) node.content = `Assumption: ${match[3]}`;
-    node.content = capitalizeFirst(node.content);
-  }
-
-  function wrapText(text, maxLen) {
-    if (!text || text.length <= maxLen) return [text || ''];
-    const words = text.split(' '), lines = [];
-    let cur = '';
-    for (const w of words) {
-      if (!cur) {
-        if (w.length > maxLen) { lines.push(w.substring(0, maxLen)); cur = w.substring(maxLen); }
-        else cur = w;
-      } else if (cur.length + 1 + w.length <= maxLen) cur += ' ' + w;
-      else { lines.push(cur); cur = w; }
-    }
-    if (cur) lines.push(cur);
-    return lines;
-  }
-
-  function formatTreeFromNodes(visibleNodes) {
-    const formattedLines = [], lineToNodeMap = [], rowGuides = [];
-
-    for (let i = 0; i < visibleNodes.length; i++) {
-      const node = visibleNodes[i];
-      const depth = node.depth;
-      const wrapped = wrapText(node.content, MAX_CONTENT_LENGTH);
-      
-      let hasLaterSibling = false;
-      for (let j = i + 1; j < visibleNodes.length; j++) {
-        if (visibleNodes[j].depth < depth) break;
-        if (visibleNodes[j].depth === depth) { hasLaterSibling = true; break; }
-      }
-
-      const ancestorSegs = [];
-      for (let d = 1; d < depth; d++) {
-        let hasLaterAncestorSibling = false;
-        for (let j = i + 1; j < visibleNodes.length; j++) {
-          if (visibleNodes[j].depth < d) break;
-          if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
-        }
-        if (hasLaterAncestorSibling) ancestorSegs.push({ col: d, kind: 'through' });
-      }
-
-      for (let w = 0; w < wrapped.length; w++) {
-        const isFirst = w === 0;
-        formattedLines.push(' '.repeat(depth * INDENT_WIDTH) + (isFirst ? NODE_MARK : '') + wrapped[w]);
-        lineToNodeMap.push({ visibleIndex: i, masterIndex: node.masterIndex, isFirstLine: isFirst });
-        const segs = ancestorSegs.slice();
-        if (depth > 0) {
-          if (isFirst) segs.push({ col: depth, kind: hasLaterSibling ? 'elbow-tee' : 'elbow-corner' });
-          else if (hasLaterSibling) segs.push({ col: depth, kind: 'through' });
-        }
-        rowGuides.push(segs);
-      }
-
-      if (i + 1 < visibleNodes.length) {
-        formattedLines.push('');
-        lineToNodeMap.push(null); 
-        const spacerSegs = [];
-        const nextNode = visibleNodes[i + 1];
-        
-        for (let d = 1; d < nextNode.depth; d++) {
-          let hasLaterAncestorSibling = false;
-          for (let j = i + 1; j < visibleNodes.length; j++) {
-            if (visibleNodes[j].depth < d) break;
-            if (visibleNodes[j].depth === d) { hasLaterAncestorSibling = true; break; }
-          }
-          if (hasLaterAncestorSibling) spacerSegs.push({ col: d, kind: 'through' });
-        }
-        if (nextNode.depth > 0) spacerSegs.push({ col: nextNode.depth, kind: 'through' });
-        rowGuides.push(spacerSegs);
-      }
-    }
-    return { text: formattedLines.join('\n'), visibleNodes, lineToNodeMap, rowGuides };
-  }
-
-  let fontMetrics = null;
-  function measureText(text) {
-    let probe = document.getElementById('probe-span');
-    if (!probe) {
-      probe = document.createElement('span');
-      probe.id = 'probe-span';
-      probe.style.position = 'absolute';
-      probe.style.visibility = 'hidden';
-      probe.style.whiteSpace = 'pre';
-      document.body.appendChild(probe);
-    }
-    const cs = getComputedStyle(editor);
-    probe.style.fontFamily = cs.fontFamily;
-    probe.style.fontSize = cs.fontSize;
-    probe.textContent = text || 'a';
-    return probe.getBoundingClientRect().width; 
-  }
-
-  function computeFontMetrics() {
-    const cs = getComputedStyle(editor);
-    return { lineHeight: parseFloat(cs.lineHeight), paddingLeft: parseFloat(cs.paddingLeft), paddingTop: parseFloat(cs.paddingTop) };
-  }
-
-  function updateMobileToolbarPadding() {
-    if (window.innerWidth <= 768 && toolbar.classList.contains('visible')) {
-      const toolbarHeight = toolbar.offsetHeight;
-      const topPadding = toolbarHeight + 20; 
-      document.documentElement.style.setProperty('--editor-padding-top', topPadding + 'px');
-    } else {
-      document.documentElement.style.setProperty('--editor-padding-top', '18px');
-    }
-    fontMetrics = null; 
-  }
-
-  function computeNodeBoxes(formatted) {
-    const lines = formatted.text.split('\n');
-    const { lineToNodeMap, visibleNodes } = formatted;
-    const boxes = [];
-    let i = 0;
-
-    while (i < lines.length) {
-      const mapInfo = lineToNodeMap[i];
-      if (!mapInfo) { i++; continue; }
-      const visIndex = mapInfo.visibleIndex;
-      const masterIndex = mapInfo.masterIndex;
-      const node = visibleNodes[visIndex];
-      if (!node) { i++; continue; }
-
-      let j = i, startCol = null, maxPxWidth = 0, hasContent = false;
-      while (j < lines.length && lineToNodeMap[j] && lineToNodeMap[j].visibleIndex === visIndex) {
-        const parsed = parseLine(lines[j]);
-        if (startCol === null) startCol = parsed.prefixLength;
-        if (parsed.content.length > 0) {
-            hasContent = true;
-            maxPxWidth = Math.max(maxPxWidth, measureText(parsed.content));
-        } else if (!hasContent) {
-            maxPxWidth = measureText(' '.repeat(18));
-            hasContent = true; 
-        }
-        j++;
-      }
-      
-      let textOverlayContent = '';
-      for(let k=i; k<j; k++) textOverlayContent += (k>i?'\n':'') + parseLine(lines[k]).content;
-
-      // Placeholder nodes ('?') get the same box size as a genuinely empty node, with the '?'
-      // centered in the middle of that box, instead of being sized to the narrow '?' glyph.
-      const isPlaceholder = node.content === '?';
-      if (isPlaceholder) maxPxWidth = measureText(' '.repeat(18));
-
-      boxes.push({ 
-        visIndex, masterIndex, lineStart: i, lineCount: j - i, 
-        prefixPxWidth: measureText(' '.repeat(startCol)), 
-        maxPxWidth, isAssumption: node.content.startsWith('Assumption:'),
-        isFolded: node.folded,
-        isPlaceholder,
-        textOverlayContent
-      });
-      i = j;
-    }
-    return boxes;
-  }
-
-  function syncOverlayScroll() { overlayContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`; }
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-
-  function renderOverlay(formatted) {
-    if (!fontMetrics) fontMetrics = computeFontMetrics();
-    const { lineHeight, paddingLeft, paddingTop } = fontMetrics;
-    overlayContent.innerHTML = '';
-    const frag = document.createDocumentFragment();
-
-    computeNodeBoxes(formatted).forEach(b => {
-      const div = document.createElement('div');
-      div.className = 'node-bubble' + (b.isAssumption ? ' assumption' : '') + (b.masterIndex === lastActiveMasterIdx ? ' active-node' : '');
-      div.style.left = (paddingLeft + b.prefixPxWidth - 12) + 'px'; 
-      div.style.top = (paddingTop + b.lineStart * lineHeight - 4) + 'px';
-      div.style.width = (b.maxPxWidth + 24) + 'px'; 
-      div.style.height = (b.lineCount * lineHeight - 3 + 8) + 'px'; 
-      
-      const txt = document.createElement('div');
-      txt.style.position = 'absolute';
-      if (b.isPlaceholder) {
-        txt.style.left = '0'; txt.style.top = '0';
-        txt.style.width = '100%'; txt.style.height = '100%';
-        txt.style.display = 'flex';
-        txt.style.alignItems = 'center';
-        txt.style.justifyContent = 'center';
-      } else {
-        txt.style.left = '12px'; txt.style.top = '4px';
-      }
-      txt.textContent = b.textOverlayContent;
-      div.appendChild(txt);
-
-      if (hasChildren(masterNodes, b.masterIndex)) {
-        const foldInd = document.createElement('div');
-        foldInd.className = 'fold-indicator';
-        foldInd.textContent = b.isFolded ? '▶' : '▼';
-        foldInd.title = b.isFolded ? 'Click to Unfold' : 'Click to Fold';
-        foldInd.onclick = (e) => {
-          e.stopPropagation();
-          toggleFold(b.masterIndex);
-        };
-        div.appendChild(foldInd);
-      }
-      frag.appendChild(div);
-    });
-
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('width', paddingLeft * 2 + 3000); 
-    svg.setAttribute('height', paddingTop * 2 + formatted.rowGuides.length * lineHeight);
-    svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.overflow = 'visible';
-
-    const mkLine = (x1, y1, x2, y2) => {
-      const l = document.createElementNS(SVG_NS, 'line');
-      l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-      l.setAttribute('stroke', '#64748b'); l.setAttribute('stroke-width', '1.5'); l.setAttribute('stroke-linecap', 'round');
-      svg.appendChild(l);
-    };
-
-    // The connector line's pixel length is derived from the ORIGINAL (pre-doubling) indent
-    // width, so it stays visually the same length. Only its position (armEndX, tied to the
-    // new, doubled INDENT_WIDTH) moves further right as depth increases - i.e. the indent
-    // distance itself doubles, but the drawn hierarchy line does not stretch.
-    const guideLinePxLength = measureText(' '.repeat(Math.max(0, GUIDE_LINE_INDENT - 3))) - 14;
-
-    formatted.rowGuides.forEach((segs, row) => {
-      const yTop = paddingTop + row * lineHeight, yMid = yTop + lineHeight / 2, yBottom = yTop + lineHeight;
-      segs.forEach(seg => {
-        const armEndX = paddingLeft + measureText(' '.repeat(seg.col * INDENT_WIDTH)) - 14; 
-        const trunkX = armEndX - guideLinePxLength; 
-        
-        if (seg.kind === 'through') mkLine(trunkX, yTop, trunkX, yBottom);
-        else if (seg.kind === 'elbow-tee') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); mkLine(trunkX, yMid, trunkX, yBottom); }
-        else if (seg.kind === 'elbow-corner') { mkLine(trunkX, yTop, trunkX, yMid); mkLine(trunkX, yMid, armEndX, yMid); }
-      });
-    });
-
-    frag.appendChild(svg); overlayContent.appendChild(frag); syncOverlayScroll();
-  }
-
-  function renderAndSave(targetMasterIdx = -1, contentOffset = 0) {
-    const visible = getVisibleNodes();
-    const formatted = formatTreeFromNodes(visible);
-    editor.value = formatted.text;
-    renderOverlay(formatted);
-    if (targetMasterIdx !== -1) {
-      restoreCursorForMasterNode(targetMasterIdx, contentOffset);
-    }
-    historyMgr.save(masterNodes, editor.selectionStart);
-    triggerAutoSave();
-  }
-
-  let scrollTimeout;
-  editor.addEventListener('scroll', () => {
-    syncOverlayScroll();
-    clearTimeout(scrollTimeout);
-    scrollTimeout = setTimeout(() => {
-        localStorage.setItem('last_scroll_left_' + currentDocName, editor.scrollLeft);
-        localStorage.setItem('last_scroll_top_' + currentDocName, editor.scrollTop);
-    }, 200);
-  });
-
-  window.addEventListener('resize', () => { 
-    updateMobileToolbarPadding();
-    fontMetrics = null; 
-    renderOverlay(formatTreeFromNodes(getVisibleNodes())); 
-  });
-
-  function updateFontSize(newSize) {
-    const clamped = Math.max(8, Math.min(48, Math.round(newSize)));
-    if (clamped === currentFontSize) return;
-    currentFontSize = clamped;
-    document.documentElement.style.setProperty('--editor-font-size', currentFontSize + 'px');
-    localStorage.setItem('tree_zoom', currentFontSize);
-    fontMetrics = null; 
-    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
-  }
-
-  // Zoom Gestures
-  editorWrap.addEventListener('wheel', (e) => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 1 : -1;
-      updateFontSize(currentFontSize + delta);
-    }
-  }, { passive: false });
-
-  let initialPinchDistance = null;
-  let initialPinchFontSize = currentFontSize;
-
-  function getDistance(touches) {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.hypot(dx, dy);
-  }
-
-  editorWrap.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 2) {
-      initialPinchDistance = getDistance(e.touches);
-      initialPinchFontSize = currentFontSize;
-    }
-  }, { passive: true });
-
-  editorWrap.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 2 && initialPinchDistance) {
-      e.preventDefault();
-      const currentDist = getDistance(e.touches);
-      const scale = currentDist / initialPinchDistance;
-      updateFontSize(initialPinchFontSize * scale);
-    }
-  }, { passive: false });
-
-  const resetPinch = () => { initialPinchDistance = null; };
-  editorWrap.addEventListener('touchend', resetPinch);
-  editorWrap.addEventListener('touchcancel', resetPinch);
-
-  function getCurrentState() {
-    const start = editor.selectionStart, lines = editor.value.split('\n');
-    let charCount = 0, currentLineIdx = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (start <= charCount + lines[i].length) { currentLineIdx = i; break; }
-      charCount += lines[i].length + 1;
-    }
-    const visible = getVisibleNodes();
-    const formatted = formatTreeFromNodes(visible);
-    const mapInfo = formatted.lineToNodeMap[currentLineIdx] || (currentLineIdx > 0 ? formatted.lineToNodeMap[currentLineIdx - 1] : { visibleIndex: 0 });
-    const visIdx = mapInfo ? mapInfo.visibleIndex : 0;
-    const visNode = visible[visIdx] || visible[0];
-    const masterIdx = visNode ? visNode.masterIndex : 0;
-
-    let contentOffset = 0;
-    for (let i = 0; i < currentLineIdx; i++) {
-      if (formatted.lineToNodeMap[i] && formatted.lineToNodeMap[i].visibleIndex === visIdx) {
-        contentOffset += parseLine(lines[i]).content.length + 1;
-      }
-    }
-    const curParsed = parseLine(lines[currentLineIdx] || '');
-    contentOffset += Math.max(0, (start - charCount) - curParsed.contentStart);
-
-    return { visibleIndex: visIdx, masterIndex: masterIdx, contentOffset, lineIndex: currentLineIdx, lineOffset: start - charCount, rawParsed: curParsed };
-  }
-
-  function getVisibleMasterIdx(targetMasterIdx) {
-    const visible = getVisibleNodes();
-    for (let v of visible) {
-      if (v.masterIndex === targetMasterIdx) return targetMasterIdx;
-    }
-    let cur = targetMasterIdx;
-    while (cur >= 0) {
-      if (visible.some(v => v.masterIndex === cur)) return cur;
-      cur--;
-    }
-    return 0;
-  }
-
-  function restoreCursorForMasterNode(targetMasterIdx, contentOffset) {
-    const visMasterIdx = getVisibleMasterIdx(targetMasterIdx);
-    const visible = getVisibleNodes();
-    const visIdx = visible.findIndex(v => v.masterIndex === visMasterIdx);
-    if (visIdx === -1) return;
-
-    const formatted = formatTreeFromNodes(visible);
-    const lines = formatted.text.split('\n');
-    let accum = 0, targetLineIdx = 0, lineContentOffset = 0;
-
-    for (let i = 0; i < lines.length; i++) {
-      const mapInfo = formatted.lineToNodeMap[i];
-      if (mapInfo && mapInfo.visibleIndex === visIdx) {
-        const p = parseLine(lines[i]);
-        if (contentOffset <= accum + p.content.length || i === lines.length - 1 || (formatted.lineToNodeMap[i + 1] && formatted.lineToNodeMap[i + 1].visibleIndex !== visIdx)) {
-          targetLineIdx = i; lineContentOffset = Math.max(0, contentOffset - accum); break;
-        }
-        accum += p.content.length + 1;
-      }
-    }
-
-    let pos = 0;
-    for (let j = 0; j < targetLineIdx && j < lines.length; j++) pos += lines[j].length + 1;
-    const targetParsed = parseLine(lines[targetLineIdx] || '');
-    editor.selectionStart = editor.selectionEnd = Math.min(formatted.text.length, Math.max(0, pos + targetParsed.contentStart + Math.min(targetParsed.content.length, lineContentOffset)));
-  }
-
-  editor.addEventListener('input', () => {
-    const state = getCurrentState();
-    const visible = getVisibleNodes();
-    const formatted = formatTreeFromNodes(visible);
-    const parsedLines = editor.value.split('\n');
-
-    for (let i = 0; i < formatted.lineToNodeMap.length; i++) {
-      const mapInfo = formatted.lineToNodeMap[i];
-      if (mapInfo && mapInfo.isFirstLine) {
-        const visIdx = mapInfo.visibleIndex;
-        const masterIdx = mapInfo.masterIndex;
-        let text = parseLine(parsedLines[i]).content;
-        let k = i + 1;
-        while (k < parsedLines.length && formatted.lineToNodeMap[k] && formatted.lineToNodeMap[k].visibleIndex === visIdx) {
-          text += ' ' + parseLine(parsedLines[k]).content;
-          k++;
-        }
-        if (masterNodes[masterIdx]) {
-          masterNodes[masterIdx].content = text;
-        }
-      }
-    }
-
-    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content.startsWith(' ') && state.contentOffset === 1) {
-      masterNodes[state.masterIndex].depth += 1;
-      masterNodes[state.masterIndex].content = masterNodes[state.masterIndex].content.substring(1);
-      renderAndSave(state.masterIndex, 0);
-      return;
-    }
-
-    renderAndSave(state.masterIndex, state.contentOffset);
-  });
-
-  function manageToolbarVisibility() {
-    const state = getCurrentState();
-    const isMarginClick = state.lineOffset < state.rawParsed.contentStart;
-    // A leftmost/margin caret on a non-root line remains on that line.
-    // It should not be redirected to the root.
-    if (document.activeElement !== editor || (isMarginClick && state.masterIndex === 0)) {
-      if(window.innerWidth < 768) toolbar.classList.remove('visible');
-      editor.blur(); 
-    } else {
-      toolbar.classList.add('visible');
-    }
-    updateMobileToolbarPadding();
-    renderOverlay(formatTreeFromNodes(getVisibleNodes()));
-  }
-
-  // Handle mouse placement ourselves.  Native textarea hit-testing can move the
-  // caret to a different visual line when the click is in the indentation or
-  // outside the node text.  That is what caused non-root clicks to jump to root.
-  let pointerDownOnEditor = false;
-  let gutterPointerDown = false;
-  let suppressPointerPlaceholder = false;
-
-  function getMouseLineIndex(e) {
-    if (!fontMetrics) fontMetrics = computeFontMetrics();
-    const rect = editor.getBoundingClientRect();
-    const y = e.clientY - rect.top + editor.scrollTop;
-    const raw = Math.floor((y - fontMetrics.paddingTop) / fontMetrics.lineHeight);
-    const formatted = formatTreeFromNodes(getVisibleNodes());
-    return Math.max(0, Math.min(formatted.lineToNodeMap.length - 1, raw));
-  }
-
-  function getLineStartPosition(lines, lineIdx) {
-    let pos = 0;
-    for (let i = 0; i < lineIdx; i++) pos += lines[i].length + 1;
-    return pos;
-  }
-
-  editor.addEventListener('mousedown', (e) => {
-    if (e.button !== 0) return;
-
-    pointerDownOnEditor = true;
-    gutterPointerDown = false;
-    suppressPointerPlaceholder = false;
-
-    const formatted = formatTreeFromNodes(getVisibleNodes());
-    const lines = formatted.text.split('\n');
-    const lineIdx = getMouseLineIndex(e);
-    const mapInfo = formatted.lineToNodeMap[lineIdx];
-
-    // Spacer rows do not represent a node.  Do not let the browser's native
-    // textarea hit-testing turn a spacer click into a click on the root.
-    if (!mapInfo) {
-      e.preventDefault();
-      const prev = lineIdx > 0 ? formatted.lineToNodeMap[lineIdx - 1] : null;
-      if (prev) {
-        const pLine = lines[lineIdx - 1] || '';
-        const p = parseLine(pLine);
-        const pos = getLineStartPosition(lines, lineIdx - 1) + p.contentStart + p.content.length;
-        editor.focus();
-        editor.selectionStart = editor.selectionEnd = pos;
-        lastActiveMasterIdx = prev.masterIndex;
-      }
-      return;
-    }
-
-    const line = lines[lineIdx] || '';
-    const parsed = parseLine(line);
-    if (!fontMetrics) fontMetrics = computeFontMetrics();
-
-    const rect = editor.getBoundingClientRect();
-    const x = e.clientX - rect.left + editor.scrollLeft;
-    const textX = fontMetrics.paddingLeft;
-    const contentX = textX + measureText(line.substring(0, parsed.contentStart));
-    const lineStart = getLineStartPosition(lines, lineIdx);
-
-    // Always take control of caret placement on a node line.  This prevents the
-    // browser from choosing another line when the click is in the gutter or
-    // beyond the visible bubble.
-    e.preventDefault();
-
-    let targetOffset = 0;
-    if (x <= contentX) {
-      // Left of the node: stay on THIS node, never root.
-      gutterPointerDown = true;
-      targetOffset = 0;
-      suppressPointerPlaceholder = true;
-    } else {
-      // Inside/behind the node: find the closest character position on THIS line.
-      const relativeX = x - contentX;
-      let best = 0;
-      let bestDistance = Infinity;
-      for (let i = 0; i <= parsed.content.length; i++) {
-        const d = Math.abs(measureText(parsed.content.substring(0, i)) - relativeX);
-        if (d < bestDistance) {
-          bestDistance = d;
-          best = i;
-        }
-      }
-      targetOffset = best;
-    }
-
-    const targetPos = lineStart + parsed.contentStart + targetOffset;
-    editor.focus();
-    editor.selectionStart = editor.selectionEnd = targetPos;
-    lastActiveMasterIdx = mapInfo.masterIndex;
-
-    // On mobile, a click in the gutter/behind a node is only for positioning
-    // the caret on that node.  It should not open/keep the on-screen keyboard.
-    // Clicking the node itself or in front of it continues to behave normally.
-    if (gutterPointerDown && window.innerWidth <= 768) {
-      // Do not leave the textarea focused after a gutter/behind-node tap.
-      // On mobile browsers the virtual keyboard can be opened asynchronously,
-      // so blur immediately and once more after the touch/click processing has
-      // completed.
-      editor.blur();
-      setTimeout(() => {
-        if (document.activeElement === editor) editor.blur();
-      }, 50);
-      setTimeout(() => {
-        if (document.activeElement === editor) editor.blur();
-      }, 250);
-    }
-
-    renderOverlay(formatted);
-  });
-
-  // Mobile touch handling: mousedown is not reliable on all mobile browsers,
-  // so explicitly handle a tap in the gutter/behind a node.  This keeps the
-  // selection on the tapped node and suppresses the virtual keyboard without
-  // affecting taps on the node text.
-  editor.addEventListener('touchstart', (e) => {
-    if (window.innerWidth > 768 || e.touches.length !== 1) return;
-
-    const touch = e.touches[0];
-    const formatted = formatTreeFromNodes(getVisibleNodes());
-    const lines = formatted.text.split('\n');
-    const lineIdx = getMouseLineIndex(touch);
-    const mapInfo = formatted.lineToNodeMap[lineIdx];
-    if (!mapInfo) return;
-
-    const line = lines[lineIdx] || '';
-    const parsed = parseLine(line);
-    if (!fontMetrics) fontMetrics = computeFontMetrics();
-    const rect = editor.getBoundingClientRect();
-    const x = touch.clientX - rect.left + editor.scrollLeft;
-    const contentX = fontMetrics.paddingLeft + measureText(line.substring(0, parsed.contentStart));
-
-    // Only intercept the gutter/behind-node case. Normal text taps retain all
-    // native textarea behavior, including keyboard opening and text selection.
-    if (x <= contentX) {
-      e.preventDefault();
-      gutterPointerDown = true;
-      suppressPointerPlaceholder = true;
-      const pos = getLineStartPosition(lines, lineIdx) + parsed.contentStart;
-      editor.focus({ preventScroll: true });
-      editor.selectionStart = editor.selectionEnd = pos;
-      lastActiveMasterIdx = mapInfo.masterIndex;
-      editor.blur();
-      setTimeout(() => { if (document.activeElement === editor) editor.blur(); }, 50);
-      setTimeout(() => { if (document.activeElement === editor) editor.blur(); }, 250);
-      renderOverlay(formatted);
-    }
-  }, { passive: false });
-
-  editor.addEventListener('mouseup', () => {
-    setTimeout(() => {
-      pointerDownOnEditor = false;
-      gutterPointerDown = false;
-      suppressPointerPlaceholder = false;
-    }, 0);
-  });
-
-  document.addEventListener('selectionchange', () => {
-    if (document.activeElement !== editor) return;
-    const state = getCurrentState();
-    let needsApply = false, targetOffset = state.contentOffset, targetMasterIdx = state.masterIndex;
-    let effectiveMasterIdx = state.masterIndex;
-    const atContent = state.lineOffset >= state.rawParsed.contentStart;
-
-    manageToolbarVisibility();
-
-    // A caret deliberately placed on a non-root node's left edge belongs to
-    // that node.  It must never be redirected to root.
-    if (!atContent && state.masterIndex !== 0) {
-      effectiveMasterIdx = state.masterIndex;
-      targetMasterIdx = state.masterIndex;
-      targetOffset = state.contentOffset;
-    }
-
-    if (effectiveMasterIdx !== lastActiveMasterIdx && lastActiveMasterIdx !== -1) {
-      if (masterNodes[lastActiveMasterIdx] && masterNodes[lastActiveMasterIdx].content !== '?') {
-        finalizeNode(masterNodes, lastActiveMasterIdx);
-        needsApply = true;
-      }
-    }
-
-    // Never create a node merely because the user clicked.  Placeholder
-    // expansion is only allowed for a genuine content-position selection,
-    // never for a gutter/behind-node mouse placement.
-    if (
-      atContent &&
-      masterNodes[effectiveMasterIdx] &&
-      masterNodes[effectiveMasterIdx].content === '?'
-    ) {
-      if (effectiveMasterIdx === 0) {
-        for (let i = 0; i < masterNodes.length; i++) masterNodes[i].depth++;
-        masterNodes.unshift({ depth: 0, content: '?', folded: false });
-        if (masterNodes[1]) masterNodes[1].content = '';
-        targetMasterIdx = 1; targetOffset = 0; needsApply = true;
-      } else if (!suppressPointerPlaceholder) {
-        masterNodes[effectiveMasterIdx].content = '';
-        masterNodes.splice(effectiveMasterIdx + 1, 0, { depth: masterNodes[effectiveMasterIdx].depth, content: '?', folded: false });
-        targetMasterIdx = effectiveMasterIdx; targetOffset = 0; needsApply = true;
-      }
-    }
-
-    const prevActiveMasterIdx = lastActiveMasterIdx;
-    lastActiveMasterIdx = targetMasterIdx;
-
-    if (needsApply) {
-      renderAndSave(targetMasterIdx, targetOffset);
-    } else if (prevActiveMasterIdx !== effectiveMasterIdx) {
-      renderOverlay(formatTreeFromNodes(getVisibleNodes()));
-    }
-  });
-
-  editor.addEventListener('blur', () => {
-    const state = getCurrentState();
-    if (masterNodes[state.masterIndex] && masterNodes[state.masterIndex].content !== '?') finalizeNode(masterNodes, state.masterIndex);
-    lastActiveMasterIdx = -1;
-    if (window.innerWidth < 768) toolbar.classList.remove('visible');
-    updateMobileToolbarPadding();
-    renderAndSave();
-  });
-
-  editor.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); historyMgr.undo((pos) => renderAndSave()); return; }
-    if ((e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') || (e.ctrlKey && e.key.toLowerCase() === 'y')) { e.preventDefault(); historyMgr.redo((pos) => renderAndSave()); return; }
-    
-    if (editor.selectionStart !== editor.selectionEnd) return;
-    const state = getCurrentState(), node = masterNodes[state.masterIndex];
-    if (!node) return;
-
-    if (e.key === ' ' && node.content === '-' && state.contentOffset === 1) {
-      e.preventDefault(); node.content = '';
-      masterNodes.splice(state.masterIndex + 1, 0, { depth: node.depth, content: '', folded: false });
-      lastActiveMasterIdx = state.masterIndex + 1;
-      renderAndSave(lastActiveMasterIdx, 0);
-    } else if (e.key === ' ' && state.lineOffset <= state.rawParsed.contentStart) {
-      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
-      const end = getSubtreeEnd(masterNodes, state.masterIndex);
-      for(let i = state.masterIndex; i < end; i++) masterNodes[i].depth++;
-      renderAndSave(state.masterIndex, 0);
-    } else if (e.key === 'Enter') {
-      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
-      let insertIdx = state.masterIndex + 1;
-      if (node.folded && hasChildren(masterNodes, state.masterIndex)) {
-        insertIdx = getSubtreeEnd(masterNodes, state.masterIndex);
-      }
-      masterNodes.splice(insertIdx, 0, { depth: node.depth, content: '', folded: false });
-      lastActiveMasterIdx = insertIdx;
-      renderAndSave(lastActiveMasterIdx, 0);
-    } else if (e.key === 'Tab') {
-      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
-      const end = getSubtreeEnd(masterNodes, state.masterIndex);
-      if (e.shiftKey && node.depth > 0) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--; } 
-      else if (!e.shiftKey) { for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth++; }
-      renderAndSave(state.masterIndex, state.contentOffset);
-    } else if (e.key === 'Backspace' && state.contentOffset === 0 && node.depth > 0) {
-      e.preventDefault(); finalizeNode(masterNodes, state.masterIndex);
-      const end = getSubtreeEnd(masterNodes, state.masterIndex);
-      for(let i=state.masterIndex; i<end; i++) masterNodes[i].depth--;
-      renderAndSave(state.masterIndex, 0);
-    }
-  });
-
-  function toggleFold(masterIdx) {
-    if (masterIdx < 0 || masterIdx >= masterNodes.length) return;
-    if (!hasChildren(masterNodes, masterIdx)) return;
-    masterNodes[masterIdx].folded = !masterNodes[masterIdx].folded;
-    renderAndSave(masterIdx);
-  }
-
-  const wrapAction = (actionFn) => () => { actionFn(); historyMgr.save(masterNodes, editor.selectionStart); triggerAutoSave(); };
-
-  document.getElementById('inspireBtn').onclick = wrapAction(() => {
-    inspireActive = !inspireActive;
-    document.getElementById('inspireBtn').classList.toggle('active', inspireActive);
-    if (inspireActive) {
-      const newNodes = [masterNodes[0] || { depth: 0, content: '?', folded: false }];
-      for (let i = 1; i < masterNodes.length; i++) {
-        if(masterNodes[i].content === '?') continue;
-        newNodes.push(masterNodes[i]);
-        let nextDepth = i + 1 < masterNodes.length ? masterNodes[i+1].depth : 0;
-        for (let d = masterNodes[i].depth; d > nextDepth; d--) newNodes.push({ depth: d, content: '?', folded: false });
-      }
-      masterNodes = newNodes;
-    } else {
-      masterNodes = masterNodes.filter((n, i) => i === 0 || n.content.trim() !== '?');
-    }
-    renderAndSave(0, 0); editor.focus();
-  });
-
-  document.getElementById('newParentBtn').onclick = wrapAction(() => {
-    const state = getCurrentState();
-    if (!masterNodes[state.masterIndex]) return;
-    const end = getSubtreeEnd(masterNodes, state.masterIndex);
-    for (let i = state.masterIndex; i < end; i++) masterNodes[i].depth++;
-    masterNodes.splice(state.masterIndex, 0, { depth: masterNodes[state.masterIndex].depth - 1, content: '', folded: false });
-    lastActiveMasterIdx = state.masterIndex;
-    renderAndSave(state.masterIndex, 0); editor.focus();
-  });
-
-  document.getElementById('newChildBtn').onclick = wrapAction(() => {
-    const state = getCurrentState();
-    if (!masterNodes[state.masterIndex]) return;
-    masterNodes[state.masterIndex].folded = false;
-    masterNodes.splice(state.masterIndex + 1, 0, { depth: masterNodes[state.masterIndex].depth + 1, content: '', folded: false });
-    lastActiveMasterIdx = state.masterIndex + 1;
-    renderAndSave(lastActiveMasterIdx, 0); editor.focus();
-  });
-  
-  document.getElementById('foldBtn').onclick = wrapAction(() => {
-    const state = getCurrentState();
-    toggleFold(state.masterIndex);
-    editor.focus();
-  });
-
-  document.getElementById('deleteNodeBtn').onclick = wrapAction(() => {
-    const state = getCurrentState(), idx = state.masterIndex;
-    if (masterNodes.length <= 1) masterNodes[0] = { depth: 0, content: '?', folded: false };
-    else { const end = getSubtreeEnd(masterNodes, idx); masterNodes.splice(idx, end - idx); if(!masterNodes.length) masterNodes.push({depth:0, content:'?', folded: false}); }
-    renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus();
-  });
-
-  document.getElementById('deletePromoteBtn').onclick = wrapAction(() => {
-    const idx = getCurrentState().masterIndex;
-    if (!masterNodes[idx] || masterNodes[idx].depth === 0) return;
-    const end = getSubtreeEnd(masterNodes, idx); for (let i = idx + 1; i < end; i++) masterNodes[i].depth--;
-    masterNodes.splice(idx, 1);
-    renderAndSave(Math.min(idx, masterNodes.length - 1), 0); editor.focus();
-  });
-
-  document.getElementById('moveUpBtn').onclick = wrapAction(() => {
-    const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx);
-    let prevStart = idx - 1; while (prevStart >= 0 && masterNodes[prevStart].depth > masterNodes[idx].depth) prevStart--;
-    if (prevStart < 0 || masterNodes[prevStart].depth !== masterNodes[idx].depth) return;
-    masterNodes.splice(prevStart, 0, ...masterNodes.splice(idx, end - idx));
-    renderAndSave(prevStart, 0); editor.focus();
-  });
-
-  document.getElementById('moveDownBtn').onclick = wrapAction(() => {
-    const idx = getCurrentState().masterIndex, end = getSubtreeEnd(masterNodes, idx);
-    if (end >= masterNodes.length || masterNodes[end].depth !== masterNodes[idx].depth) return;
-    const nextEnd = getSubtreeEnd(masterNodes, end);
-    masterNodes.splice(idx + (nextEnd - end), 0, ...masterNodes.splice(idx, end - idx));
-    renderAndSave(idx + (nextEnd - end), 0); editor.focus();
-  });
-
-  // Save/Load logic
-  document.getElementById('openBtn').onclick = () => {
-    const select = document.getElementById('savedList');
-    select.innerHTML = '';
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('tree_doc_'));
-    keys.forEach(k => { 
-        const opt = document.createElement('option'); 
-        opt.value = k; 
-        opt.textContent = k.replace('tree_doc_', '') + (k.replace('tree_doc_', '') === currentDocName ? ' (Current)' : ''); 
-        select.appendChild(opt); 
-    });
-    document.getElementById('saveModal').style.display = 'flex';
-  };
-  document.getElementById('closeModalBtn').onclick = () => document.getElementById('saveModal').style.display = 'none';
-  document.getElementById('saveDocBtn').onclick = () => {
-    const name = prompt('Name your document:', currentDocName !== 'default' ? currentDocName : '');
-    if(name) { 
-        currentDocName = name;
-        triggerAutoSave(); 
-        document.getElementById('closeModalBtn').click(); 
-    }
-  };
-
-  function loadDocByName(docKey) {
-    currentDocName = docKey.replace('tree_doc_', '');
-    const raw = localStorage.getItem(docKey);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) masterNodes = parsed;
-        else masterNodes = parseDocumentToNodes(raw);
-      } catch(e) {
-        masterNodes = parseDocumentToNodes(raw);
-      }
-    }
-    renderAndSave();
-    setTimeout(() => {
-        editor.scrollLeft = localStorage.getItem('last_scroll_left_' + currentDocName) || 0;
-        editor.scrollTop = localStorage.getItem('last_scroll_top_' + currentDocName) || 0;
-    }, 0);
-    localStorage.setItem('last_open_doc', currentDocName);
-  }
-
-  document.getElementById('loadDocBtn').onclick = () => {
-    const val = document.getElementById('savedList').value;
-    if(val) { 
-        loadDocByName(val);
-        document.getElementById('closeModalBtn').click(); 
-    }
-  };
-  document.getElementById('deleteDocBtn').onclick = () => {
-    const val = document.getElementById('savedList').value;
-    if(val) { 
-        localStorage.removeItem(val); 
-        localStorage.removeItem('last_scroll_left_' + val.replace('tree_doc_', ''));
-        localStorage.removeItem('last_scroll_top_' + val.replace('tree_doc_', ''));
-        document.getElementById('openBtn').click(); 
-    }
-  };
-  document.getElementById('importExportBtn').onclick = () => {
-    const text = formatTreeFromNodes(getVisibleNodes()).text;
-    navigator.clipboard.writeText(text).then(() => {
-        const paste = prompt("Exported to clipboard! Paste plain text here to Import (or click Cancel):");
-        if (paste) {
-          masterNodes = parseDocumentToNodes(paste);
-          renderAndSave(0, 0);
-        }
-    });
-  };
-
-  // Initialization & Load State
-  const savedDoc = localStorage.getItem('last_open_doc');
-  if (savedDoc && localStorage.getItem('tree_doc_' + savedDoc)) {
-      loadDocByName('tree_doc_' + savedDoc);
-  } else {
-      masterNodes = [{ depth: 0, content: '?', folded: false }];
-      renderAndSave();
-  }
-
-  if (document.fonts && document.fonts.ready) { 
-      document.fonts.ready.then(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }); 
-  } else {
-      setTimeout(() => { fontMetrics = null; renderAndSave(); historyMgr.save(masterNodes, 0); }, 200);
-  }
-</script>
-
-</body>
-</html>
+Close
